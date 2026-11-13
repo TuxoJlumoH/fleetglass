@@ -5,115 +5,152 @@
 <h1 align="center">Fleetglass</h1>
 
 <p align="center">
-  <b>A fast, keyboard-first Kubernetes desktop app for many clusters at once.</b><br>
-  Open source. No account, no telemetry, no AI in the core, no cluster-size limits.
+  <b>A fast, keyboard-first Kubernetes client for desktop and mobile.</b><br>
+  Open source. Zero telemetry. No account. Offline-first architecture with hardware-backed encryption.
 </p>
 
 <p align="center">
   <a href="LICENSE"><img alt="Licence: Apache-2.0" src="https://img.shields.io/badge/licence-Apache--2.0-blue"></a>
-  <img alt="Status: 0.4" src="https://img.shields.io/badge/status-0.4-green">
-  <img alt="Platforms" src="https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey">
-  <img alt="Built with Tauri and Rust" src="https://img.shields.io/badge/built%20with-Tauri%202%20%2B%20Rust-dea584">
+  <a href="https://github.com/TuxoJlumoH/fleetglass/releases"><img alt="Version: 0.4.0" src="https://img.shields.io/badge/release-v0.4.0-green"></a>
+  <img alt="Platforms: Linux | macOS | Windows | Android" src="https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20Android-lightgrey">
+  <img alt="Built with Tauri 2 + Rust" src="https://img.shields.io/badge/built%20with-Tauri%202%20%2B%20Rust-dea584">
 </p>
 
 <p align="center">
-  <img src="docs/assets/screenshot.png" width="900" alt="Fleetglass showing pods from a test cluster">
+  <img src="docs/assets/screenshot.png" width="900" alt="Fleetglass desktop client showing pods from multiple Kubernetes clusters">
 </p>
 
-> [!NOTE]
-> **0.4 release.** Tested live on Linux against real clusters and on
-> macOS 13 (Intel) and Windows 11. Installers are not code-signed yet, so macOS and Windows warn
-> on first launch. Read [Known limitations](docs/KNOWN-LIMITATIONS.md) before relying on it.
+---
 
-## Features
+## Highlights
 
-- **Fast on big clusters.** The Rust backend keeps the data; the UI only receives the rows on
-  screen. Sorting, filtering and scrolling 50,000 pods stay under 100 ms, checked in CI.
-- **Many clusters, one table.** *All Clusters* merges pods from every context, with a Cluster
-  column. Clusters connect only when you open them.
-- **Keyboard-first.** k9s-style keys (`j`/`k`, `/`, `s`, `r`, `Ctrl+D`) and a `Ctrl+K`
-  (`⌘K`) command palette.
-- **Safe changes.** Every action shows its `kubectl` command first. Contexts can be colour-coded,
-  read-only, or protected (type the name to confirm). A local audit log records what you changed.
-- **Honest.** "No permission to list Secrets" instead of an empty list; pod status computed the
-  way `kubectl` does.
-- **The everyday tools:** live logs with search, a shell into containers, port-forwarding, YAML
-  editing with server-side dry-run and diff, scale / restart / delete, Helm releases and
-  connection diagnostics.
-- **Ecosystem views** for Gateway API, Argo CD, Flux and Karpenter.
-- **Yours.** Apache-2.0, DCO sign-off instead of a CLA. The app talks only to your Kubernetes
-  API servers.
+- **Blazing fast at scale.** An in-memory Rust query engine projects and window-slices resources. Sorting, filtering, and scrolling across 50,000 pods stays under 50 ms.
+- **Simultaneous multi-context exploration.** `Ctrl`/`⌘`+click across any combination of clusters in the sidebar. Merged tables display a pinned, color-coded Context column with independent per-cluster access indicators.
+- **Strict write safety & audit trail.** Mutating actions preview their exact `kubectl` command before executing. Protected contexts enforce typed-name confirmation, read-only contexts can be temporarily unlocked for 15 minutes, and all actions are recorded in a local JSONL audit log.
+- **Interactive debugging suite.** Launch ephemeral debug containers (`pods/ephemeralcontainers`), attach to PID 1, or start host-namespace Node debug shells (`node/<name>`). Handoff to your favourite native terminal emulator (`ghostty`, `kitty`, `alacritty`, `wezterm`, `iTerm2`, `wt.exe`) with shell-safe escaping.
+- **Cloud auth & device code recovery.** Automatically detects expired sessions (`aws sso`, `gcloud`, `az`, `kubelogin`, OIDC), extracts verification URLs and user codes, and triggers seamless cluster reconnection.
+- **Resource right-sizing.** Overview analyzes live container metrics against requests and limits to flag Near Limit (≥80%), Over Request (>100%), Unused Requests (<10%, <20%, <50%), and Missing Limits.
+- **Standalone Android client.** Direct connection to your API servers with hardware-backed Keystore AES-256-GCM encryption, virtualized pull-to-refresh lists, touch ergonomics, and battery-friendly watcher management.
 
-## Install
+---
 
-Download the installer for your system from
-[Releases](https://github.com/TuxoJlumoH/fleetglass/releases):
+## Desktop Experience
 
-| System | File | Notes |
+| Multi-Cluster Overview Dashboard | Deep Resource Drawer & Live Inspection |
+|:---:|:---:|
+| <img src="docs/assets/desktop-overview.png" width="450" alt="Fleetglass Overview Dashboard"> | <img src="docs/assets/desktop-drawer.png" width="450" alt="Fleetglass Pod Summary Drawer"> |
+| *Cluster capacity, warning events & right-sizing* | *Container metrics, condition chips & safe actions* |
+
+| Crisp Light Theme | Keyboard-First Command Palette |
+|:---:|:---:|
+| <img src="docs/assets/desktop-light.png" width="450" alt="Fleetglass Light Theme"> | <img src="docs/assets/screenshot.png" width="450" alt="Fleetglass Command Palette"> |
+| *Semantic tokens following system appearance* | *k9s-style keys (`j`/`k`, `/`, `s`, `r`) & `⌘K` palette* |
+
+---
+
+## Standalone Mobile Client (Android)
+
+Fleetglass runs as a standalone native app on Android (API 29+ / Android 10+). It talks directly to your Kubernetes API servers — no intermediate relay, no cloud backend, and no third-party accounts. Kubeconfigs and credentials are encrypted on-device via the Android Keystore.
+
+<p align="center">
+  <img src="docs/assets/mobile-overview.png" width="215" alt="Android Overview">
+  &nbsp;&nbsp;
+  <img src="docs/assets/mobile-pods.png" width="215" alt="Android Pods List">
+  &nbsp;&nbsp;
+  <img src="docs/assets/mobile-detail.png" width="215" alt="Android Pod Detail Drawer">
+  &nbsp;&nbsp;
+  <img src="docs/assets/mobile-logs.png" width="215" alt="Android Live Streaming Logs">
+</p>
+
+<p align="center">
+  <em>Cluster Health Overview · Virtualized Pods with Pull-to-Refresh · Container Details & Safe Actions · Live Log Streaming</em>
+</p>
+
+---
+
+## Everyday Tools & Operations
+
+- **Logs & Diagnostics:** Workload and single-pod log streaming, regex search, previous container log recovery, level filters (Error/Warn/Info/Debug), and bounded local export.
+- **Arbitrary Compare / Diff:** Side-by-side YAML diffing comparing any two resources across clusters or namespaces with normalization toggles (mask generated hashes/status) and Secret data masking.
+- **X.509 Certificate Inspector:** Automatic chain parsing, SAN listing, and validity tracking for TLS Secrets and cert-manager Certificates with expiring alert banners.
+- **Port-Forward Manager:** Persistent saved configurations across restarts, live TCP connection counters, byte transfer telemetry, and audit logging.
+- **Ecosystem CRD Views:** Built-in projections for Gateway API (`Gateway`, `HTTPRoute`, `GRPCRoute`), Argo CD (`Application`), Flux (`Kustomization`, `HelmRelease`), cert-manager (`Certificate`), and External Secrets (`ExternalSecret`).
+
+---
+
+## Installation
+
+Download pre-built binaries from [Releases](https://github.com/TuxoJlumoH/fleetglass/releases):
+
+| Platform | Package | Notes |
 |---|---|---|
-| Android (10+, API 29+) | `fleetglass-android-arm64-v8a.apk` (phones), `fleetglass-android-x86_64.apk` (emulators) | Standalone APK. See [Android APK verification](docs/VERIFYING_APK.md). |
-| Windows 10/11 (x64) | `Fleetglass_<version>_x64-setup.exe` or `.msi` | SmartScreen warns because the installer is unsigned: **More info → Run anyway**. |
-| macOS (Intel) | `Fleetglass_<version>_x64.dmg` | Unsigned: right-click the app → **Open** the first time (macOS 15+: **System Settings → Privacy & Security → Open Anyway**). Apple Silicon builds are coming. |
-| Linux | build from source for now | Packages (AppImage, deb, rpm, Flatpak, AUR) are planned. |
+| **Android** (10+, API 29+) | `fleetglass-android-arm64-v8a.apk`<br>`fleetglass-android-x86_64.apk` | Standalone client. See [Android Verification Guide](docs/VERIFYING_APK.md). |
+| **Linux** | Build from source | Linux packages (Flatpak, AUR, deb, rpm) and ARM64 builds in progress for v0.5. |
+| **macOS** (Intel / Apple Silicon) | `Fleetglass_<version>_x64.dmg` | Open via **System Settings → Privacy & Security → Open Anyway** on first launch. |
+| **Windows** (10/11 x64) | `Fleetglass_<version>_x64-setup.exe` | SmartScreen warning on first launch: **More info → Run anyway**. |
 
-Fleetglass reads your kubeconfig the same way `kubectl` does (`KUBECONFIG`, or `~/.kube/config`).
-It never changes it.
+> [!NOTE]
+> Fleetglass loads your kubeconfig read-only (`KUBECONFIG` or `~/.kube/config`). It **never modifies** your original kubeconfig files.
 
-## Build from source
+---
 
-You need Rust (stable), Node.js 24 and pnpm 12, plus the [Tauri system
-dependencies](https://tauri.app/start/prerequisites/) for your OS.
+## Build from Source
+
+Requirements: Rust (stable), Node.js (v22+), and `pnpm` (v10+).
 
 ```sh
+# Clone repository
 git clone https://github.com/TuxoJlumoH/fleetglass.git
 cd fleetglass
-scripts/bootstrap.sh --check     # Linux/macOS: checks your toolchain
+
+# Install UI dependencies & launch desktop dev mode
 pnpm -C ui install
-pnpm -C ui tauri dev             # run in development mode
-pnpm -C ui tauri build           # installers in target/release/bundle/
+pnpm -C ui tauri dev
+
+# Build release desktop bundles
+pnpm -C ui tauri build
 ```
 
-[CONTRIBUTING.md](CONTRIBUTING.md) covers tests, the local `kind` test cluster and Windows/macOS setup.
+---
 
-## Roadmap
+## Architecture
 
-Next up for **0.2** ([details](docs/TASKS.md#phase-02-polish-and-missing-basics-planned-2026-11-04)):
-
-- CPU and memory columns in pod and node tables
-- Clear status reasons ("Unschedulable", last restart and why)
-- YAML editor with line numbers and highlighting
-- StatefulSets, DaemonSets, CronJobs, Ingresses, Events and PVCs in the sidebar
-- A richer pod summary, a refreshed UI with a light theme, and an overview page
-  ([mockups](docs/mockups/v0.2/))
-- Signed installers and Apple Silicon builds
-
-Then **0.3: an Android app** ([details](docs/TASKS.md#phase-03-android-app-planned-2026-11-04-starts-after-02-gate)).
-It is a standalone app: it connects to your clusters directly, with no server or account. You can
-check status, read logs and events, and restart, scale or delete with the same safety checks as on
-desktop.
-
-## How it works
+Fleetglass uses a split-process architecture designed for zero UI lag:
 
 ```
-crates/core   Kubernetes engine: kubeconfig, watch cache, row projection, query engine,
-              logs, exec, port-forward, diagnostics (no Tauri dependency)
-crates/app    Tauri 2 shell: thin IPC layer over core
-crates/bench  performance harness and budgets (kind + kwok)
-ui/           React 19 + TypeScript
+crates/core   Pure Rust Kubernetes engine: kubeconfig parser, reflector caches,
+              query engine, streaming logs, exec, port-forward, and audit log.
+crates/app    Tauri 2 desktop/mobile application shell with Specta-generated bindings.
+crates/bench  Reproducible performance benchmark suite against synthetic & Kind clusters.
+ui/           React 19 + TypeScript: virtualized windowed tables, CodeMirror 6 editor.
 ```
 
-The UI never receives full object lists. It asks the backend for a window of rows (offset, limit,
-sort, filter) and gets batched updates. Why: [ADR 0002](docs/adr/0002-data-architecture.md).
+The frontend never receives unbounded JSON payloads; the Rust backend executes windowed queries (`offset`, `limit`, `sort`, `filter`) and pushes minimal diffs.
+
+---
+
+## Roadmap (Phase 0.5 & Beyond)
+
+Next up for **v0.5.0** ([details](docs/PLAN.md#phase-05-distribution-packaging--daily-driver-polish-active-2026-11-13)):
+
+- **Signed In-App Auto-Updater:** `tauri-plugin-updater` with ECDSA signature verification.
+- **Expanded Packaging:** Flatpak, AUR (`PKGBUILD`), Homebrew Cask, winget, and Linux ARM64 releases.
+- **Per-Namespace Watcher Fallback:** Graceful fallback to watching accessible namespaces on RBAC 403 Forbidden.
+- **In-App PTY Terminal:** Embedded `xterm.js` with dynamic PTY window resize signals alongside external terminal handoff.
+- **Split View Layout:** Resizable horizontal and vertical split panes for simultaneous side-by-side inspection.
+- **Schema Validation & Autocomplete:** Kubernetes OpenAPI JSONSchema diagnostics inside the CodeMirror 6 YAML editor.
+
+---
 
 ## Contributing
 
-Issues and pull requests are welcome. Sign off your commits (`git commit -s`); no CLA. See
-[CONTRIBUTING.md](CONTRIBUTING.md), [GOVERNANCE.md](GOVERNANCE.md) and the
-[Code of conduct](CODE_OF_CONDUCT.md). Report security problems privately as described in
-[SECURITY.md](SECURITY.md).
+Contributions are welcome! Please sign off your commits with `git commit -s` (Developer Certificate of Origin; no CLA required).
 
-More docs: [Changelog](CHANGELOG.md) · [Known limitations](docs/KNOWN-LIMITATIONS.md) ·
-[Plan](docs/PLAN.md) · [Android verification](docs/VERIFYING_APK.md) · [Architecture ADRs](docs/adr/)
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) for local dev cluster setup and workflow rules.
+- Read [GOVERNANCE.md](GOVERNANCE.md) and our [Code of Conduct](CODE_OF_CONDUCT.md).
+- Report security concerns responsibly via [SECURITY.md](SECURITY.md).
+
+---
 
 ## Licence
 
