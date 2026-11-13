@@ -210,7 +210,7 @@ pub fn detect_available_terminal_emulators() -> Vec<TerminalEmulatorInfo> {
             "~/Applications/iTerm.app",
         ];
         for p in iterm_paths {
-            let path = Path::new(p);
+            let path = std::path::Path::new(p);
             if path.exists() {
                 emulators.push(TerminalEmulatorInfo {
                     emulator_type: TerminalEmulatorType::ITerm2,
