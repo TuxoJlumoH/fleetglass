@@ -146,11 +146,21 @@ Time estimates assume 1–2 developers working part-time. Halve them for full-ti
 - Limit: exec credential plugins (EKS/GKE/AKS login tools) can't run on Android; tokens, client certs and OIDC refresh tokens work.
 - Tasks: `03-01`..`03-06`, `03-GATE` in TASKS.md.
 
-### Phase 0.4: Power-user & multi-cluster operations (active 2026-11-11)
+### Phase 0.4: Power-user & multi-cluster operations (completed 2026-11-13)
 - **Simultaneous multi-context exploration:** (04-01) Select any subset of contexts (`Ctrl/⌘+click` or saved cluster groups) across all resource tables, Overview, Events, and Logs, with a pinned colour-coded `Context` column and independent per-cluster access banners.
 - **Cloud auth & expired credential recovery:** (04-02) Detect expired `aws sso` / `gcloud` / `az` / `kubelogin` / OIDC sessions, parse device-code prompts (URL + code), and offer one-click terminal sign-in with automatic client invalidation and reconnect.
 - **Ephemeral debug containers, container attach, and node debug shell:** (04-03) `pods/ephemeralcontainers` (`busybox`, `netshoot`, `alpine`, custom image, target process namespace), container `attach`, and `kubectl debug node/<name>` host shell — all gated by `enforce_write_safety`, `kubectl` preview, and audit logging.
 - Tasks: `04-01`..`04-10`, `04-GATE` in TASKS.md.
+
+### Phase 0.5: Distribution, Packaging & Daily-Driver Polish (active 2026-11-13)
+- **Per-namespace watcher fallback on RBAC 403:** (05-01) Dynamically discover accessible namespaces and spawn per-namespace watchers when cluster-wide listing is forbidden, rendering honest restricted-scope indicators.
+- **In-app xterm.js PTY terminal emulator:** (05-02) Full interactive terminal rendering (vim, htop, k9s) with dynamic PTY window resize signaling across Pod exec, attach, and node debug shells.
+- **Split view & multi-pane layout manager:** (05-03) Resizable horizontal and vertical split panes (`Ctrl+\` / `Ctrl+Shift+\`) with independent query specs and windowed scroll state.
+- **Kubernetes JSON schema validation & autocompletion:** (05-04) Integrate OpenAPI JSONSchema into the CodeMirror 6 YAML editor with live diagnostics and autocomplete.
+- **Safe browser opener for active port-forwards:** (05-05) Audited one-click browser launcher for active loopback port-forwards and ingress endpoints.
+- **Signed in-app auto-updater & expanded packaging:** (05-06) `tauri-plugin-updater` with cryptographic release verification, Flatpak, AUR (`PKGBUILD`), Homebrew Cask, winget, and Linux ARM64 release pipelines.
+- **Live Kind smoke pass & release review:** (05-GATE) Kind dev cluster validation, headless E2E smoke tests under Xvfb (`scripts/e2e-smoke.sh`), 50k pod benchmarks, and v0.5.0 release review.
+- Tasks: `05-01`..`05-06`, `05-GATE` in TASKS.md.
 
 ### Phase 3: Ecosystem (ongoing)
 - Argo CD / Flux / Gateway API / Karpenter views
