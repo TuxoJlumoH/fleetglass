@@ -143,11 +143,18 @@ ensure_kwok() {
     ctrl="$(fetch_pinned "$FG_KWOK_URL" "$FG_KWOK_SHA256")"
     stages="$(fetch_pinned "$FG_KWOK_STAGES_URL" "$FG_KWOK_STAGES_SHA256")"
     log "installing kwok controller $FG_KWOK_VERSION (kube-system/kwok-controller)"
+    if command -v docker >/dev/null 2>&1 && command -v kind >/dev/null 2>&1; then
+      docker pull "registry.k8s.io/kwok/kwok:$FG_KWOK_VERSION" >/dev/null 2>&1 || true
+      docker pull "registry.k8s.io/pause:3.10" >/dev/null 2>&1 || true
+      kind load docker-image "registry.k8s.io/kwok/kwok:$FG_KWOK_VERSION" --name "$FG_CLUSTER_NAME" >/dev/null 2>&1 || true
+      kind load docker-image "registry.k8s.io/pause:3.10" --name "$FG_CLUSTER_NAME" >/dev/null 2>&1 || true
+    fi
     k apply --server-side --force-conflicts -f "$ctrl" >/dev/null
     k wait --for condition=established --timeout=60s crd/stages.kwok.x-k8s.io >/dev/null
     k apply --server-side --force-conflicts -f "$stages" >/dev/null
   fi
-  k -n kube-system rollout status deploy/kwok-controller --timeout=180s >/dev/null
+  k -n kube-system rollout status deploy/kwok-controller --timeout=300s >/dev/null \
+    || { k -n kube-system describe deploy/kwok-controller || true; k -n kube-system get pods -A || true; die "kwok-controller rollout failed"; }
 }
 
 # Sum of ready replicas over the scale Deployments.

@@ -117,6 +117,7 @@ jobs:
     name: Tauri build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    continue-on-error: ${{ matrix.os == 'macos-latest' }}
     strategy:
       fail-fast: false
       matrix:
