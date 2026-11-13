@@ -1,0 +1,179 @@
+# Import validation (03-02a): one context per ImportProblem plus importable ones.
+apiVersion: v1
+kind: Config
+current-context: token-ok
+preferences:
+  colors: true
+extensions:
+  - name: top-level
+    extension: {}
+clusters:
+  - name: secure
+    cluster:
+      server: https://secure.example.test:6443
+      certificate-authority-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCg==
+      certificate-authority: /home/someone/ca.crt
+      extensions:
+        - name: cluster-ext
+          extension: {}
+  - name: unused
+    cluster:
+      server: https://unused.example.test
+      certificate-authority-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCg==
+  - name: ca-file
+    cluster:
+      server: https://ca-file.example.test
+      certificate-authority: /home/someone/.minikube/ca.crt
+  - name: no-ca
+    cluster:
+      server: https://no-ca.example.test
+  - name: insecure
+    cluster:
+      server: https://insecure.example.test
+      insecure-skip-tls-verify: true
+  - name: no-server
+    cluster:
+      certificate-authority-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCg==
+contexts:
+  - name: token-ok
+    context:
+      cluster: secure
+      user: token-user
+      namespace: default
+      extensions:
+        - name: ctx-ext
+          extension: {}
+  - name: cert-ok
+    context:
+      cluster: secure
+      user: cert-user
+  - name: oidc
+    context:
+      cluster: secure
+      user: oidc-user
+  - name: insecure
+    context:
+      cluster: insecure
+      user: token-user
+  - name: exec
+    context:
+      cluster: secure
+      user: exec-user
+  - name: gcp
+    context:
+      cluster: secure
+      user: gcp-user
+  - name: ca-file
+    context:
+      cluster: ca-file
+      user: token-user
+  - name: cert-file
+    context:
+      cluster: secure
+      user: cert-file-user
+  - name: key-file
+    context:
+      cluster: secure
+      user: key-file-user
+  - name: token-file
+    context:
+      cluster: secure
+      user: token-file-user
+  - name: no-ca
+    context:
+      cluster: no-ca
+      user: token-user
+  - name: missing-cluster
+    context:
+      cluster: does-not-exist
+      user: token-user
+  - name: missing-user
+    context:
+      cluster: secure
+      user: does-not-exist
+  - name: no-server
+    context:
+      cluster: no-server
+      user: token-user
+  - name: oidc-no-id-token
+    context:
+      cluster: secure
+      user: oidc-no-id-token-user
+  - name: oidc-idp-ca-file
+    context:
+      cluster: secure
+      user: oidc-idp-ca-file-user
+  - name: cert-without-key
+    context:
+      cluster: secure
+      user: cert-without-key-user
+  - name: key-file-without-cert
+    context:
+      cluster: secure
+      user: key-file-without-cert-user
+users:
+  - name: token-user
+    user:
+      token: fixture-secret-token
+  - name: unused-user
+    user:
+      token: unused-token
+  - name: cert-user
+    user:
+      client-certificate-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCg==
+      client-key-data: LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCg==
+  - name: oidc-user
+    user:
+      auth-provider:
+        name: oidc
+        config:
+          client-id: fleetglass
+          idp-issuer-url: https://issuer.example.test
+          id-token: fixture-id-token
+          refresh-token: fixture-refresh-token
+          idp-certificate-authority-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCg==
+  - name: oidc-no-id-token-user
+    user:
+      auth-provider:
+        name: oidc
+        config:
+          client-id: fleetglass
+          idp-issuer-url: https://issuer.example.test
+          refresh-token: fixture-refresh-token
+  - name: oidc-idp-ca-file-user
+    user:
+      auth-provider:
+        name: oidc
+        config:
+          client-id: fleetglass
+          idp-issuer-url: https://issuer.example.test
+          id-token: fixture-id-token
+          idp-certificate-authority: /home/someone/idp-ca.crt
+  - name: cert-without-key-user
+    user:
+      client-certificate-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCg==
+  - name: key-file-without-cert-user
+    user:
+      client-key: /home/someone/client.key
+  - name: exec-user
+    user:
+      exec:
+        apiVersion: client.authentication.k8s.io/v1beta1
+        command: aws
+        args: [eks, get-token, --cluster-name, demo]
+  - name: gcp-user
+    user:
+      auth-provider:
+        name: gcp
+        config: {}
+  - name: cert-file-user
+    user:
+      client-certificate: /home/someone/client.crt
+      client-key-data: LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCg==
+  - name: key-file-user
+    user:
+      client-certificate-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCg==
+      client-key: /home/someone/client.key
+  - name: token-file-user
+    user:
+      tokenFile: /var/run/secrets/token

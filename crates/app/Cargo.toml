@@ -1,0 +1,51 @@
+[package]
+name = "fleetglass-app"
+description = "Fleetglass desktop app (Tauri 2 shell over fleetglass-core)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+default-run = "fleetglass"
+
+[lib]
+name = "fleetglass_app"
+path = "src/lib.rs"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "fleetglass"
+path = "src/main.rs"
+
+# Regenerates ui/src/generated/bindings.ts (see docs/adr/0001-ipc-type-generation.md).
+[[bin]]
+name = "gen-types"
+path = "src/bin/gen_types.rs"
+
+# Tauri deps live here (not in [workspace.dependencies]) on purpose: only this crate uses them.
+[build-dependencies]
+tauri-build = { version = "2.7.4", features = [] }
+
+[dependencies]
+fleetglass-core = { workspace = true, features = ["specta"] }
+anyhow.workspace = true
+# Global allocator (R-14b): lower idle RSS than glibc's per-thread arenas. MIT.
+mimalloc.workspace = true
+serde.workspace = true
+tokio.workspace = true
+# Already in Cargo.lock via core and tauri; serializes the detached logs window target.
+serde_json = "1"
+tauri = { version = "2.12.5", features = [] }
+# Release candidates: pinned exactly, upgraded deliberately (ADR 0001).
+specta = { version = "=2.0.0-rc.26" }
+specta-typescript = { version = "=0.0.13" }
+tauri-specta = { version = "=2.0.0-rc.26", features = ["derive", "typescript"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+# Bytes over the Kotlin plugin bridge (JSON) for Keystore seal/open and the document picker
+# (03-02b). MIT OR Apache-2.0; already in Cargo.lock via tauri/kube, so no new code is pulled in.
+base64 = "0.22"
+
+[lints]
+workspace = true

@@ -1,0 +1,30 @@
+# kind config for the fleetglass-dev cluster (rendered by scripts/dev-cluster.sh).
+# The API server is published on the docker VM's address, never on 6443 (the VM's k3s).
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: @CLUSTER_NAME@
+networking:
+  apiServerAddress: "@API_ADDRESS@"
+  apiServerPort: @API_PORT@
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        # Higher client QPS so ReplicaSets/scheduler keep up with kwok scale runs
+        # (defaults of 20-50 qps make a 5000-pod run take minutes). kubeadm v1beta4 lists may be
+        # replaced rather than merged, so kind's own controller-manager arg is repeated here.
+        kind: ClusterConfiguration
+        controllerManager:
+          extraArgs:
+            - name: enable-hostpath-provisioner
+              value: "true"
+            - name: kube-api-qps
+              value: "100"
+            - name: kube-api-burst
+              value: "200"
+        scheduler:
+          extraArgs:
+            - name: kube-api-qps
+              value: "100"
+            - name: kube-api-burst
+              value: "200"

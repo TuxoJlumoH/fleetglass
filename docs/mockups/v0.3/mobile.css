@@ -1,0 +1,76 @@
+/* v0.3 phone mockups. Everything visual comes from the desktop reference
+   (../v0.2/mock.css); this file only adds the phone frame and touch sizes. */
+@import url("../v0.2/mock.css");
+
+body { width: 412px; height: 915px; font-size: 13.5px; }
+.phone { display: flex; flex-direction: column; height: 100%; border-top: 3px solid var(--ctx); position: relative; }
+
+/* app bar = the desktop sidebar context selector + tab title */
+.appbar { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--bg-elev);
+  border-bottom: 1px solid var(--border); }
+.appbar .ham { width: 40px; height: 40px; display: grid; place-items: center; color: var(--fg-muted); }
+.appbar .ham svg.i, .appbar .act svg.i { width: 20px; height: 20px; }
+.appbar .ctxsel { flex: 1; margin: 0; height: 40px; min-width: 0; }
+.appbar .ctxsel .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.appbar .act { width: 40px; height: 40px; display: grid; place-items: center; color: var(--fg-muted); }
+
+/* title row under the app bar, like the desktop tab strip */
+.titlebar { display: flex; align-items: center; gap: 10px; padding: 12px 14px 4px; }
+.titlebar .t { font-size: 18px; font-weight: 600; }
+.titlebar .s { color: var(--fg-muted); }
+.titlebar .btn { margin-left: auto; }
+
+.content { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+.pad { padding: 10px 12px; display: flex; flex-direction: column; gap: 12px; }
+
+/* touch sizes */
+.btn { height: 38px; padding: 0 12px; font-size: 13px; }
+.btn.sm { height: 34px; padding: 0 10px; }
+.search { width: auto; flex: 1; height: 40px; }
+.toolbar { padding: 8px 12px; gap: 8px; flex-wrap: wrap; }
+.toolbar .summary { margin-left: 0; width: 100%; gap: 12px; }
+
+/* pod rows: the desktop table folded into two lines */
+.rows { border-top: 1px solid var(--border); }
+.row { padding: 10px 14px; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  display: flex; flex-direction: column; gap: 6px; min-height: 64px; }
+.row.err { background: var(--row-err); }
+.row.sel { background: var(--bg-sel); box-shadow: inset 3px 0 0 var(--accent); }
+.row .l1 { display: flex; align-items: center; gap: 8px; }
+.row .l1 .name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.row .l2 { display: flex; align-items: center; gap: 10px; color: var(--fg-muted); font-size: 12px; }
+.row .l2 .use { min-width: 0; width: 86px; }
+.row .l2 .meta { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .l2 .rs.hot { color: var(--err); font-weight: 600; }
+
+/* status strip = desktop status bar, shortened */
+.status { height: 26px; flex: none; gap: 12px; }
+
+/* bottom navigation */
+.bnav { display: flex; height: 60px; flex: none; background: var(--bg-elev); border-top: 1px solid var(--border); }
+.bnav div { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  font-size: 11.5px; color: var(--fg-muted); position: relative; }
+.bnav div svg.i { width: 20px; height: 20px; }
+.bnav div.on { color: var(--fg); }
+.bnav div.on::before { content: ""; position: absolute; top: 0; left: 28%; right: 28%; height: 3px;
+  border-radius: 0 0 3px 3px; background: var(--accent); }
+.bnav .fail { position: absolute; top: 9px; left: 56%; width: 7px; height: 7px; border-radius: 50%; background: var(--err); }
+
+/* cards on a phone */
+.card .body { padding: 12px; }
+.kv { grid-template-columns: 110px 1fr; }
+
+/* slide-over: the desktop sidebar unchanged */
+.scrim { position: absolute; inset: 0; background: rgba(0,0,0,.5); }
+.slide { position: absolute; top: 0; left: 0; bottom: 0; width: 300px; background: var(--bg-elev);
+  border-right: 1px solid var(--border); box-shadow: 12px 0 30px rgba(0,0,0,.35); padding: 12px 10px; overflow: hidden; }
+.slide .nav { height: 40px; font-size: 14px; }
+.slide .nav svg.i { width: 18px; height: 18px; }
+.slide .grp { margin-top: 6px; }
+.slide .ctxsel { height: 44px; }
+
+/* detail sheet */
+.sheet-h { padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.sheet-tabs { display: flex; gap: 20px; padding: 0 14px; border-bottom: 1px solid var(--border); height: 42px; align-items: flex-end; }
+.sheet-tabs span { padding-bottom: 10px; color: var(--fg-muted); }
+.sheet-tabs span.on { color: var(--fg); font-weight: 500; border-bottom: 2px solid var(--accent); }

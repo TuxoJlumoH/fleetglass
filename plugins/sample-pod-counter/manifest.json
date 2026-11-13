@@ -1,0 +1,8 @@
+{
+  "id": "sample-pod-counter",
+  "name": "Sample Pod Counter",
+  "version": "0.1.0",
+  "description": "Displays pod counts across connected clusters",
+  "permissions": ["read:contexts", "read:resources"],
+  "entrypoint": "index.html"
+}

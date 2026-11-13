@@ -1,0 +1,54 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="mobile.css"></head><body class=""><div class="phone">
+<div class="appbar">
+  <div class="ham"><svg class="i" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></div>
+  <div class="ctxsel"><span class="sw"></span><span class="nm">kind-fleetglass-dev</span><span class="dot ok" style="margin-left:2px"></span><span class="chev"><svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span></div>
+  <div class="act"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></div>
+</div>
+<div class="titlebar"><span class="t">Pods</span><span class="s">kind-fleetglass-dev</span><span class="btn sm"><svg class="i" viewBox="0 0 24 24"><path d="M12 2 3 7v10l9 5 9-5V7z"/><path d="M3 7l9 5 9-5M12 12v10"/></svg>Workloads<svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span></div>
+<div class="toolbar">
+  <div class="search"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Filter pods…</div>
+  <div class="btn"><svg class="i" viewBox="0 0 24 24"><path d="M3 7l9-4 9 4-9 4z"/><path d="M3 12l9 4 9-4M3 17l9 4 9-4"/></svg>All ns<svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></div>
+  <div class="summary"><span><b>42</b> pods</span><span><b class="e">3</b> failing</span><span><b>1</b> pending</span>
+    <span style="margin-left:auto">Sort: CPU ▾</span></div>
+</div>
+<div class="content"><div class="rows">
+<div class="row err">
+  <div class="l1"><span class="name">crashloop-6f7b9c-x8k2</span><span class="pill err">CrashLoopBackOff</span></div>
+  <div class="l2"><div class="use"><div class="v">0m<span></span></div><div class="bar"><i class="" style="width:0%"></i></div></div><div class="use"><div class="v">2Mi<span></span></div><div class="bar"><i class="" style="width:2%"></i></div></div><span class="meta">default · 0/1 · <span class="rs hot">↻14</span> · 2d</span></div>
+</div>
+<div class="row ">
+  <div class="l1"><span class="name">migrate-28713400-h7jc2</span><span class="pill off">Completed</span></div>
+  <div class="l2"><span class="mut" style="width:86px">CPU —</span><span class="mut" style="width:86px">Mem —</span><span class="meta">jobs · 0/1 · <span class="rs">↻0</span> · 5h</span></div>
+</div>
+<div class="row ">
+  <div class="l1"><span class="name">pending-q2m4</span><span class="pill warn">Unschedulable</span></div>
+  <div class="l2"><span class="mut" style="width:86px">CPU —</span><span class="mut" style="width:86px">Mem —</span><span class="meta">default · 0/1 · <span class="rs">↻0</span> · 2d</span></div>
+</div>
+<div class="row ">
+  <div class="l1"><span class="name">api-5c6b2d9f7-wq8zn</span><span class="pill ok">Running</span></div>
+  <div class="l2"><div class="use"><div class="v">41m<span>41% req</span></div><div class="bar"><i class="req" style="width:100%"></i><i class="" style="width:41%"></i></div></div><div class="use"><div class="v">118Mi<span>92% lim</span></div><div class="bar"><i class="req" style="width:100%"></i><i class="warn" style="width:92%"></i></div></div><span class="meta">default · 2/2 · <span class="rs">↻1</span> · 2d</span></div>
+</div>
+<div class="row sel">
+  <div class="l1"><span class="name">web-7d9f8c6b5-k2x4p</span><span class="pill ok">Running</span></div>
+  <div class="l2"><div class="use"><div class="v">3m<span>3% req</span></div><div class="bar"><i class="req" style="width:100%"></i><i class="" style="width:3%"></i></div></div><div class="use"><div class="v">12Mi<span>9% req</span></div><div class="bar"><i class="req" style="width:100%"></i><i class="" style="width:9%"></i></div></div><span class="meta">default · 1/1 · <span class="rs">↻0</span> · 2d</span></div>
+</div>
+<div class="row ">
+  <div class="l1"><span class="name">redis-0</span><span class="pill ok">Running</span></div>
+  <div class="l2"><div class="use"><div class="v">7m<span>14% req</span></div><div class="bar"><i class="req" style="width:100%"></i><i class="" style="width:14%"></i></div></div><div class="use"><div class="v">31Mi<span>24% req</span></div><div class="bar"><i class="req" style="width:100%"></i><i class="" style="width:24%"></i></div></div><span class="meta">data · 1/1 · <span class="rs">↻0</span> · 2d</span></div>
+</div>
+<div class="row ">
+  <div class="l1"><span class="name">kindnet-5wq2r</span><span class="pill ok">Running</span></div>
+  <div class="l2"><div class="use"><div class="v">1m<span>1% req</span></div><div class="bar"><i class="req" style="width:100%"></i><i class="" style="width:1%"></i></div></div><div class="use"><div class="v">9Mi<span>18% req</span></div><div class="bar"><i class="req" style="width:100%"></i><i class="" style="width:18%"></i></div></div><span class="meta">kube-system · 1/1 · <span class="rs">↻0</span> · 2d</span></div>
+</div>
+<div class="row ">
+  <div class="l1"><span class="name">coredns-668d6bf9bc-9xk4t</span><span class="pill ok">Running</span></div>
+  <div class="l2"><div class="use"><div class="v">2m<span>2% req</span></div><div class="bar"><i class="req" style="width:100%"></i><i class="" style="width:2%"></i></div></div><div class="use"><div class="v">16Mi<span>23% req</span></div><div class="bar"><i class="req" style="width:100%"></i><i class="" style="width:23%"></i></div></div><span class="meta">kube-system · 1/1 · <span class="rs">↻0</span> · 2d</span></div>
+</div>
+<div class="row ">
+  <div class="l1"><span class="name">coredns-668d6bf9bc-tq7lm</span><span class="pill ok">Running</span></div>
+  <div class="l2"><div class="use"><div class="v">2m<span>2% req</span></div><div class="bar"><i class="req" style="width:100%"></i><i class="" style="width:2%"></i></div></div><div class="use"><div class="v">15Mi<span>21% req</span></div><div class="bar"><i class="req" style="width:100%"></i><i class="" style="width:21%"></i></div></div><span class="meta">kube-system · 1/1 · <span class="rs">↻0</span> · 2d</span></div>
+</div>
+<div class="row ">
+  <div class="l1"><span class="name">etcd-fleetglass-dev</span><span class="pill ok">Running</span></div>
+  <div class="l2"><div class="use"><div class="v">19m<span>19% req</span></div><div class="bar"><i class="req" style="width:100%"></i><i class="" style="width:19%"></i></div></div><div class="use"><div class="v">44Mi<span>44% req</span></div><div class="bar"><i class="req" style="width:100%"></i><i class="" style="width:44%"></i></div></div><span class="meta">kube-system · 1/1 · <span class="rs">↻0</span> · 2d</span></div>
+</div></div></div><footer class="status"><span><span class="dot ok"></span>Connected</span><span>Updated 2s ago</span><div class="r"><span><svg class="i" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/></svg>Read-write</span></div></footer><nav class="bnav"><div><svg class="i" viewBox="0 0 24 24"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>Overview</div><div class="on"><svg class="i" viewBox="0 0 24 24"><path d="M12 2 3 7v10l9 5 9-5V7z"/><path d="M3 7l9 5 9-5M12 12v10"/></svg>Workloads</div><div><svg class="i" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>Events<span class="fail"></span></div><div><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>Settings</div></nav></div></body></html>

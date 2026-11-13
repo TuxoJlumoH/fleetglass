@@ -1,0 +1,49 @@
+[package]
+name = "fleetglass-core"
+description = "Fleetglass headless Kubernetes engine (no Tauri dependency)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+name = "fleetglass_core"
+
+[features]
+# Enables integration tests against the kind dev cluster (KUBECONFIG=$PWD/.dev/kubeconfig).
+integration = []
+# Derives `specta::Type` on IPC types (crates/core/src/api) for TypeScript generation (ADR 0001).
+specta = ["dep:specta"]
+
+[dependencies]
+kube.workspace = true
+k8s-openapi.workspace = true
+tokio.workspace = true
+futures = "0.3"
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json = "1"
+regex = "1"
+# MIT OR Apache-2.0. Gzip decoding of Helm v3 release payloads (P2-07); replaces a
+# hand-rolled inflater. Default `rust_backend` (miniz_oxide): pure Rust, no C toolchain.
+flate2 = "1"
+# MIT OR Apache-2.0. Reads/writes the tar streams exchanged with `tar` inside the
+# container for file copy (P2-06), same wire format as `kubectl cp`. Default features
+# off: archives are built in memory, so the `xattr` filesystem support is not needed.
+tar = { version = "0.4", default-features = false }
+# MIT OR Apache-2.0. Encodes the CA of a "paste token" context into certificate-authority-data
+# (03-02a). Already in the tree via kube-client (same 0.22), so no new crate is built.
+base64 = "0.22"
+# Release candidate, pinned exactly; must match the version used by tauri-specta in crates/app.
+specta = { version = "=2.0.0-rc.26", features = ["derive"], optional = true }
+x509-parser = "0.18.1"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true
+

@@ -1,0 +1,14 @@
+{
+  "app": {
+    "security": {
+      "csp": {
+        "frame-src": "'self' http://fgplugin.localhost https://fgplugin.localhost",
+        "child-src": "'self' http://fgplugin.localhost https://fgplugin.localhost"
+      },
+      "devCsp": {
+        "frame-src": "'self' http://fgplugin.localhost https://fgplugin.localhost",
+        "child-src": "'self' http://fgplugin.localhost https://fgplugin.localhost"
+      }
+    }
+  }
+}

@@ -1,0 +1,280 @@
+# Fleetglass CI.
+#
+# Runs workspace checks, tests, and builds. No secrets, no telemetry, no uploads.
+# Third-party actions are pinned to full commit SHAs (version in the trailing comment); Dependabot
+# (.github/dependabot.yml) proposes updates.
+#
+# Verified locally only by YAML parsing + actionlint/shellcheck; `act` was not run. Not verifiable
+# locally: runner images, apt package names, macOS/Windows builds, kind inside the runner, cache
+# behaviour, and the DCO step on a real PR.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Keep every main run (history of green builds); cancel superseded PR runs only.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  rust:
+    name: Rust (fmt, clippy, test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/linux-tauri-deps
+
+      # rustup on the runner installs the toolchain and components from rust-toolchain.toml.
+      - name: Install Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install && rustc --version && cargo --version
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # tauri::generate_context!() fails at compile time when frontendDist (ui/dist) is missing.
+      # The real UI is not needed for clippy/tests, an empty directory is enough.
+      - name: Placeholder ui/dist for Tauri compile
+        run: mkdir -p ui/dist
+
+      - name: cargo fmt
+        run: cargo fmt --all --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: cargo test
+        run: cargo test --workspace --locked
+
+      - name: Perf budget gate (10k and 50k pods)
+        run: |
+          cargo run -p bench --release --locked -- --pods 10000 --assert-budgets
+          cargo run -p bench --release --locked -- --pods 50000 --assert-budgets
+
+  deny:
+    name: Dependencies (cargo deny)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Licences, bans and sources must pass; new RustSec advisories are reported in a separate,
+      # non-blocking step so an upstream advisory cannot break unrelated PRs.
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check licenses bans sources
+
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        continue-on-error: true
+        with:
+          command: check advisories
+
+  ui:
+    name: UI (lint, typecheck, test, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-ui
+
+      - name: Lint
+        run: pnpm -C ui lint
+
+      - name: Typecheck
+        run: pnpm -C ui typecheck
+
+      - name: Test
+        run: pnpm -C ui test
+
+      - name: Build
+        run: pnpm -C ui build
+
+  tauri-build:
+    name: Tauri build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # PRs build Linux only; macOS/Windows minutes are spent on pushes to main.
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest","windows-latest"]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - if: runner.os == 'Linux'
+        uses: ./.github/actions/linux-tauri-deps
+
+      - name: Install Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install && rustc --version && cargo --version
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: ./.github/actions/setup-ui
+
+      # Prefer the Tauri CLI: it runs beforeBuildCommand (`pnpm build` → ui/dist) and builds the
+      # release binary with the custom-protocol feature, as a release would. If the CLI is not in
+      # ui/package.json (before P0-05 lands), build ui/dist first and fall back to cargo.
+      - name: Build app (no bundle)
+        run: |
+          if node -e 'const p=require("./ui/package.json"); process.exit(p.scripts?.tauri && p.devDependencies?.["@tauri-apps/cli"] ? 0 : 1)'; then
+            echo "Using Tauri CLI"
+            pnpm -C ui tauri build --no-bundle -- --locked
+          else
+            echo "Tauri CLI not in ui/package.json yet; falling back to cargo build"
+            pnpm -C ui build
+            cargo build -p fleetglass-app --release --locked
+          fi
+
+  integration:
+    name: Integration (kind)
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      KIND_CLUSTER: fleetglass-dev
+      # On the runner Docker is local: use the local socket and bind the kind API server to
+      # loopback, regardless of any FG_DOCKER_HOST a developer may use.
+      DOCKER_HOST: unix:///var/run/docker.sock
+      FG_KIND_API_ADDRESS: 127.0.0.1
+      FG_KIND_API_PORT: "7443"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/linux-tauri-deps
+
+      - name: Install Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install && rustc --version && cargo --version
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Placeholder ui/dist for Tauri compile
+        run: mkdir -p ui/dist
+
+      # Compile before creating the cluster so a build failure does not waste cluster time.
+      - name: Build integration tests
+        run: cargo test --workspace --features integration --locked --no-run
+
+      - name: Install kind and kubectl
+        uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+        with:
+          install_only: true
+
+      - name: Export KUBECONFIG
+        run: echo "KUBECONFIG=${GITHUB_WORKSPACE}/.dev/kubeconfig" >> "$GITHUB_ENV"
+
+      - name: Create kind cluster (scripts/dev-cluster.sh)
+        if: hashFiles('scripts/dev-cluster.sh') != ''
+        run: scripts/dev-cluster.sh up
+
+      # Fallback while P0-07 (scripts/dev-cluster.sh) has not landed.
+      - name: Create kind cluster (fallback)
+        if: hashFiles('scripts/dev-cluster.sh') == ''
+        run: |
+          mkdir -p .dev
+          kind create cluster --name "$KIND_CLUSTER" --kubeconfig "$KUBECONFIG" --wait 120s
+
+      - name: Cluster info
+        run: |
+          kubectl version
+          kubectl get nodes -o wide
+
+      - name: cargo test (integration)
+        run: cargo test --workspace --features integration --locked
+
+      # Follow-up (R-15): app-level E2E smoke test. Not enabled yet: it needs the Deployments view
+      # to list Deployments (ui/src kind wiring, in progress) and extra tools on the runner:
+      #   sudo apt-get install -y xvfb x11-utils tesseract-ocr libxtst6 + ImageMagick 7 (`magick`)
+      # plus ./.github/actions/setup-ui for pnpm.
+      # - name: E2E smoke test (Xvfb, scripts/e2e-smoke.sh)
+      #   run: scripts/e2e-smoke.sh
+
+      - name: Scale cluster with kwok and assert perf budgets
+        run: |
+          scripts/scale-cluster.sh up --pods 1000
+          cargo run -p bench --release --locked -- --pods 10000 --assert-budgets
+
+      - name: Delete kind cluster
+        if: always()
+        run: |
+          if [[ -x scripts/dev-cluster.sh ]]; then
+            scripts/dev-cluster.sh down || true
+          fi
+          kind delete cluster --name "$KIND_CLUSTER" || true
+
+  dco:
+    name: DCO sign-off
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      # Every non-merge commit in the PR needs "Signed-off-by: <author name> <author email>"
+      # (bot authors: any Signed-off-by line).
+      - name: Check Signed-off-by on every commit
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          failed=0
+          count=0
+          while read -r sha; do
+            [[ -z "$sha" ]] && continue
+            count=$((count + 1))
+            author="$(git show -s --format='%an <%ae>' "$sha")"
+            subject="$(git show -s --format='%s' "$sha")"
+            body="$(git show -s --format='%B' "$sha")"
+            if grep -qxF "Signed-off-by: ${author}" <<<"$body"; then
+              echo "ok      ${sha:0:12} ${subject}"
+            elif [[ "$author" == *"[bot]@users.noreply.github.com>" ]] \
+              && grep -qE '^Signed-off-by: .+ <.+>$' <<<"$body"; then
+              # Bots (e.g. Dependabot) sign off with an address that differs from the author email.
+              echo "ok(bot) ${sha:0:12} ${subject}"
+            else
+              echo "::error::Commit ${sha:0:12} (\"${subject}\") has no 'Signed-off-by: ${author}' line"
+              failed=1
+            fi
+          done < <(git rev-list --no-merges "${BASE_SHA}..${HEAD_SHA}")
+          echo "Checked ${count} commit(s)."
+          if [[ "$failed" -ne 0 ]]; then
+            echo "Fix with: git rebase --signoff ${BASE_SHA} && git push --force-with-lease"
+            echo "See CONTRIBUTING.md (Developer Certificate of Origin)."
+            exit 1
+          fi

@@ -1,0 +1,279 @@
+# Fleetglass Release Pipeline (task P1-16, 03-06).
+#
+# Builds signed desktop bundles (.deb, .rpm, .AppImage, .dmg, .msi, .exe) and signed Android APKs
+# (arm64-v8a and x86_64), generates CycloneDX SBOMs from Cargo.lock and ui/pnpm-lock.yaml, and
+# produces SHA-256 checksums for every release artifact.
+# Third-party actions are pinned to full commit SHAs (version in the trailing comment); Dependabot
+# (.github/dependabot.yml) proposes updates.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build-bundles:
+    name: Build bundles (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - ubuntu-24.04-arm
+          - macos-latest
+          - windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - if: runner.os == 'Linux'
+        uses: ./.github/actions/linux-tauri-deps
+
+      - name: Install Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install && rustc --version && cargo --version
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: true
+
+      - uses: ./.github/actions/setup-ui
+
+      - name: Verify Rust formatting and unit tests
+        run: cargo fmt --all --check && cargo test --workspace --locked
+
+      - name: Build Tauri release bundles
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm -C ui tauri build -- --locked
+
+      - name: Generate SBOM (Cargo.lock + ui/pnpm-lock.yaml)
+        run: |
+          set -euo pipefail
+          cargo metadata --format-version 1 --locked > sbom-cargo-${{ runner.os }}.json
+          node - "sbom-cargo-${{ runner.os }}.json" "sbom-${{ runner.os }}.json" "${{ runner.os }}" "${{ github.ref_name }}" "${{ github.sha }}" <<'EOF'
+          const fs = require("node:fs");
+          const crypto = require("node:crypto");
+          const [, , cargoMetaPath, outPath, osName, gitRef, gitSha] = process.argv;
+          const cargoMeta = JSON.parse(fs.readFileSync(cargoMetaPath, "utf8"));
+          const sha256File = (p) => crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex");
+          const sbom = {
+            bomFormat: "CycloneDX",
+            specVersion: "1.5",
+            version: 1,
+            metadata: {
+              timestamp: new Date().toISOString(),
+              component: {
+                type: "application",
+                name: "fleetglass",
+                version: gitRef || "dev",
+              },
+              properties: [
+                { name: "git.sha", value: gitSha || "" },
+                { name: "runner.os", value: osName || "" },
+                { name: "lockfile.cargo.sha256", value: sha256File("Cargo.lock") },
+                { name: "lockfile.pnpm.sha256", value: sha256File("ui/pnpm-lock.yaml") },
+              ],
+            },
+            components: (cargoMeta.packages || []).map((pkg) => ({
+              type: "library",
+              name: pkg.name,
+              version: pkg.version,
+              purl: "pkg:cargo/" + pkg.name + "@" + pkg.version,
+              licenses: pkg.license ? [{ license: { expression: pkg.license } }] : [],
+            })),
+          };
+          fs.writeFileSync(outPath, JSON.stringify(sbom, null, 2) + "\n");
+          EOF
+
+      - name: Collect bundles, SBOM, and SHA-256 checksums
+        run: |
+          set -euo pipefail
+          mkdir -p dist-artifacts
+          cp "sbom-${{ runner.os }}.json" "sbom-cargo-${{ runner.os }}.json" dist-artifacts/
+          if [[ -d target/release/bundle ]]; then
+            while IFS= read -r -d '' file; do
+              cp "$file" dist-artifacts/
+            done < <(
+              find target/release/bundle -type f \( \
+                -name '*.deb' -o \
+                -name '*.rpm' -o \
+                -name '*.AppImage' -o \
+                -name '*.dmg' -o \
+                -name '*.msi' -o \
+                -name '*.exe' -o \
+                -name '*.sig' \
+              \) -print0
+            )
+          fi
+          (
+            cd dist-artifacts
+            shopt -s nullglob
+            files=( * )
+            if (( ${#files[@]} == 0 )); then
+              echo "No artifacts collected in dist-artifacts/" >&2
+              exit 1
+            fi
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "${files[@]}" > "SHA256SUMS-${{ runner.os }}.txt"
+            else
+              shasum -a 256 "${files[@]}" > "SHA256SUMS-${{ runner.os }}.txt"
+            fi
+            cat "SHA256SUMS-${{ runner.os }}.txt"
+          )
+
+      - name: Upload desktop artifacts
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: artifacts-${{ matrix.os }}
+          path: dist-artifacts/*
+
+  build-android:
+    name: Build Android APKs
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/linux-tauri-deps
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@3a4f6e1af504cf6a31855fa899c6aa5355ba6c12 # v4.7.0
+        with:
+          distribution: "temurin"
+          java-version: "21"
+
+      - name: Configure Android SDK and NDK
+        run: |
+          set -euo pipefail
+          echo "ANDROID_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
+          sdk_dir="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          if [[ -d "${sdk_dir}/ndk/27.2.12479018" ]]; then
+            echo "NDK_HOME=${sdk_dir}/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          elif ls -d "${sdk_dir}/ndk/"* 1>/dev/null 2>&1; then
+            latest_ndk="$(ls -d "${sdk_dir}/ndk/"* | sort -V | tail -n1)"
+            echo "NDK_HOME=${latest_ndk}" >> "$GITHUB_ENV"
+          else
+            echo "Installing NDK 27.2.12479018 via sdkmanager..."
+            "${sdk_dir}/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.2.12479018"
+            echo "NDK_HOME=${sdk_dir}/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          fi
+
+      - name: Install Rust toolchain (rust-toolchain.toml) and Android targets
+        run: |
+          rustup toolchain install
+          rustup target add aarch64-linux-android x86_64-linux-android
+          rustc --version && cargo --version
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: true
+
+      - uses: ./.github/actions/setup-ui
+
+      - name: Build Android APKs (arm64-v8a, x86_64)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_RELEASE_STORE_FILE: ${{ secrets.ANDROID_RELEASE_STORE_FILE }}
+          ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: pnpm -C ui tauri android build -t aarch64 -t x86_64 --apk --split-per-abi
+
+      - name: Generate SBOM (Cargo.lock + ui/pnpm-lock.yaml)
+        run: |
+          set -euo pipefail
+          cargo metadata --format-version 1 --locked > sbom-cargo-android.json
+          node - "sbom-cargo-android.json" "sbom-android.json" "android" "${{ github.ref_name }}" "${{ github.sha }}" <<'EOF'
+          const fs = require("node:fs");
+          const crypto = require("node:crypto");
+          const [, , cargoMetaPath, outPath, osName, gitRef, gitSha] = process.argv;
+          const cargoMeta = JSON.parse(fs.readFileSync(cargoMetaPath, "utf8"));
+          const sha256File = (p) => crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex");
+          const sbom = {
+            bomFormat: "CycloneDX",
+            specVersion: "1.5",
+            version: 1,
+            metadata: {
+              timestamp: new Date().toISOString(),
+              component: {
+                type: "application",
+                name: "fleetglass",
+                version: gitRef || "dev",
+              },
+              properties: [
+                { name: "git.sha", value: gitSha || "" },
+                { name: "platform", value: osName || "" },
+                { name: "lockfile.cargo.sha256", value: sha256File("Cargo.lock") },
+                { name: "lockfile.pnpm.sha256", value: sha256File("ui/pnpm-lock.yaml") },
+              ],
+            },
+            components: (cargoMeta.packages || []).map((pkg) => ({
+              type: "library",
+              name: pkg.name,
+              version: pkg.version,
+              purl: "pkg:cargo/" + pkg.name + "@" + pkg.version,
+              licenses: pkg.license ? [{ license: { expression: pkg.license } }] : [],
+            })),
+          };
+          fs.writeFileSync(outPath, JSON.stringify(sbom, null, 2) + "\n");
+          EOF
+
+      - name: Collect Android artifacts, SBOM, and SHA-256 checksums
+        run: |
+          set -euo pipefail
+          mkdir -p dist-artifacts
+          find crates/app/gen/android/app/build/outputs/apk -type f -name "*.apk" | while read -r apk; do
+            echo "Found APK: $apk"
+            cp "$apk" dist-artifacts/
+            filename="$(basename "$apk")"
+            if [[ "$filename" == *"arm64"* ]]; then
+              cp "$apk" dist-artifacts/fleetglass-android-arm64-v8a.apk
+            elif [[ "$filename" == *"x86_64"* ]]; then
+              cp "$apk" dist-artifacts/fleetglass-android-x86_64.apk
+            fi
+          done
+          cp "sbom-android.json" "sbom-cargo-android.json" dist-artifacts/
+          (
+            cd dist-artifacts
+            shopt -s nullglob
+            files=( * )
+            if (( ${#files[@]} == 0 )); then
+              echo "No artifacts collected in dist-artifacts/" >&2
+              exit 1
+            fi
+            sha256sum "${files[@]}" > SHA256SUMS-android.txt
+            cat SHA256SUMS-android.txt
+          )
+
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: artifacts-android
+          path: dist-artifacts/*

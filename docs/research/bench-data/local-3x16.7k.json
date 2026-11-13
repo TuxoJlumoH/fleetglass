@@ -1,0 +1,42 @@
+{
+  "mode": "cluster",
+  "contexts": [
+    "kwok-fleetglass-scale-1",
+    "kwok-fleetglass-scale-2",
+    "kwok-fleetglass-scale-3"
+  ],
+  "podsPerContext": {
+    "kwok-fleetglass-scale-1": 16667,
+    "kwok-fleetglass-scale-2": 16667,
+    "kwok-fleetglass-scale-3": 16667
+  },
+  "pods": 50001,
+  "clusters": 3,
+  "namespaces": 198,
+  "iterations": 50,
+  "projectAllMs": 0.0,
+  "firstPageRunsMs": [
+    2415.085692,
+    2461.990096,
+    2478.9718669999997
+  ],
+  "firstPageMs": 2478.9718669999997,
+  "queryP50Ms": 111.69214099999999,
+  "queryP95Ms": 143.004668,
+  "queryMaxMs": 201.52324299999998,
+  "baselineRssMb": 8.12109375,
+  "peakSyncRssMb": 453.50390625,
+  "idleRssMb": 453.50390625,
+  "idleSecs": 5,
+  "idleKbPerPod": 9.121257574848503,
+  "peakKbPerPod": 9.121257574848503,
+  "rssMb": 453.50390625,
+  "rssBudgetMb": 500.0,
+  "rssBudgetName": "Memory, 3 clusters with 50k pods total",
+  "rssNote": "RSS of the bench process only (ClusterManager + watch stores); excludes the Tauri/WebKit baseline of the desktop app",
+  "budgetsPassed": false,
+  "budgetFailures": [
+    "first_page_ms (2478.97 ms, worst run) >= budget (1500.0 ms)",
+    "query_p95_ms (143.00 ms) >= budget (50.0 ms)"
+  ]
+}

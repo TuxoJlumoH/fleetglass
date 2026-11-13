@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.fleetglass.Fleetglass</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
+  <name>Fleetglass</name>
+  <summary>Fast, keyboard-first, multi-cluster Kubernetes desktop client</summary>
+  <description>
+    <p>
+      Fleetglass is an open-source, fast, keyboard-first desktop client for managing Kubernetes clusters.
+      Featuring multi-cluster querying, resource diffing, real-time workload logs, application views,
+      and write-safety guarantees.
+    </p>
+  </description>
+  <launchable type="desktop-id">dev.fleetglass.Fleetglass.desktop</launchable>
+  <url type="homepage">https://github.com/TuxoJlumoH/fleetglass</url>
+  <url type="bugtracker">https://github.com/TuxoJlumoH/fleetglass/issues</url>
+  <provides>
+    <binary>fleetglass</binary>
+  </provides>
+</component>

@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Config
+contexts:
+  - name: broken
+    context:
+      cluster: c
+     user: misindented

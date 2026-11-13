@@ -1,0 +1,21 @@
+{
+  "mode": "synthetic",
+  "pods": 50000,
+  "clusters": 3,
+  "namespaces": 20,
+  "iterations": 50,
+  "projectAllMs": 17.549923999999994,
+  "firstPageRunsMs": [
+    19.569640999999994
+  ],
+  "firstPageMs": 19.569640999999994,
+  "queryP50Ms": 1.169682,
+  "queryP95Ms": 1.2347029999999999,
+  "queryMaxMs": 3.294324,
+  "rssMb": 63.734375,
+  "rssBudgetMb": 500.0,
+  "rssBudgetName": "Memory, 3 clusters with 50k pods total",
+  "rssNote": "RSS of the bench process after projecting and querying in memory",
+  "budgetsPassed": true,
+  "budgetFailures": []
+}

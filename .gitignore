@@ -1,0 +1,51 @@
+# Local dev state (kubeconfig, tool downloads)
+.dev/
+
+# Internal dev & task tracking
+AGENTS.md
+GEMINI.md
+.dsh/
+docs/RUNNING-AGENTS.md
+docs/TASKS.md
+scripts/agents.sh
+scripts/agent-bin/
+
+# Rust
+target/
+**/*.rs.bk
+*.pdb
+
+# Tauri (lives in crates/app)
+crates/app/gen/schemas/
+
+# Node / UI
+node_modules/
+ui/dist/
+.pnpm-store/
+.vite/
+coverage/
+*.tsbuildinfo
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+playwright-report/
+test-results/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Editors / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+*~
+.DS_Store
+Thumbs.db
+.pnpm-store/
+__pycache__/
+.dev/gradle/
+.dev/android_home/

@@ -1,0 +1,31 @@
+# Second file of a two-file merge. Its "shared" entries and current-context lose.
+apiVersion: v1
+kind: Config
+current-context: prod
+clusters:
+  - name: prod-cluster
+    cluster:
+      server: https://prod.example.test
+  - name: shared-cluster
+    cluster:
+      server: https://shared-from-b.example.test
+contexts:
+  - name: prod
+    context:
+      cluster: prod-cluster
+      user: prod-user
+  - name: shared
+    context:
+      cluster: shared-cluster
+      user: shared-user
+      namespace: from-b
+users:
+  - name: prod-user
+    user:
+      client-certificate: certs/prod.crt
+      client-key: certs/prod.key
+  - name: shared-user
+    user:
+      exec:
+        apiVersion: client.authentication.k8s.io/v1beta1
+        command: should-not-win

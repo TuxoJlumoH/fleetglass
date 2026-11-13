@@ -1,0 +1,28 @@
+# First file of a two-file merge. Wins for "shared" context/cluster/user.
+apiVersion: v1
+kind: Config
+current-context: dev
+clusters:
+  - name: dev-cluster
+    cluster:
+      server: https://dev.example.test:6443
+  - name: shared-cluster
+    cluster:
+      server: https://shared-from-a.example.test
+contexts:
+  - name: dev
+    context:
+      cluster: dev-cluster
+      user: dev-user
+      namespace: team-a
+  - name: shared
+    context:
+      cluster: shared-cluster
+      user: shared-user
+users:
+  - name: dev-user
+    user:
+      token: fixture-token-not-a-secret
+  - name: shared-user
+    user:
+      token: fixture-token-a

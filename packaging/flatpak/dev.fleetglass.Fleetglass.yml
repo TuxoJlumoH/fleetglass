@@ -1,0 +1,22 @@
+app-id: dev.fleetglass.Fleetglass
+runtime: org.gnome.Platform
+runtime-version: '46'
+sdk: org.gnome.Sdk
+command: fleetglass
+finish-args:
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --share=network
+  - --filesystem=home:ro
+modules:
+  - name: fleetglass
+    buildsystem: simple
+    build-commands:
+      - install -D fleetglass /app/bin/fleetglass
+      - install -D -m 644 dev.fleetglass.Fleetglass.desktop /app/share/applications/dev.fleetglass.Fleetglass.desktop
+      - install -D -m 644 dev.fleetglass.Fleetglass.metainfo.xml /app/share/metainfo/dev.fleetglass.Fleetglass.metainfo.xml
+    sources:
+      - type: file
+        url: @REPO_URL@/releases/download/v@VERSION@/fleetglass-@VERSION@-x86_64.AppImage
+        sha256: @SHA256@

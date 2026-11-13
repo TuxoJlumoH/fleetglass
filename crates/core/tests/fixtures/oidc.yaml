@@ -1,0 +1,30 @@
+# Legacy auth-provider entries: oidc and gcp.
+apiVersion: v1
+kind: Config
+clusters:
+  - name: oidc-cluster
+    cluster:
+      server: https://oidc.example.test
+contexts:
+  - name: oidc
+    context:
+      cluster: oidc-cluster
+      user: oidc-user
+  - name: gke-legacy
+    context:
+      cluster: oidc-cluster
+      user: gcp-user
+users:
+  - name: oidc-user
+    user:
+      auth-provider:
+        name: oidc
+        config:
+          client-id: fleetglass
+          idp-issuer-url: https://issuer.example.test
+          id-token: fixture-id-token
+  - name: gcp-user
+    user:
+      auth-provider:
+        name: gcp
+        config: {}

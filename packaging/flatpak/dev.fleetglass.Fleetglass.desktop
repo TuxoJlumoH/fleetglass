@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Fleetglass
+Comment=Fast, keyboard-first, multi-cluster Kubernetes desktop client
+Exec=fleetglass %U
+Icon=dev.fleetglass.Fleetglass
+Terminal=false
+Type=Application
+Categories=Development;System;Utility;
+Keywords=kubernetes;k8s;cluster;client;pod;container;

@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sample Pod Counter</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #111317;
+      color: #e6edf3;
+    }
+    h1 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin: 0 0 12px 0;
+      color: #fafafa;
+    }
+    .card {
+      background: #181b21;
+      border: 1px solid #2b313d;
+      border-radius: 6px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+    .count {
+      font-size: 2.25rem;
+      font-weight: 700;
+      color: #58a6ff;
+      line-height: 1.2;
+    }
+    .status {
+      font-size: 0.8rem;
+      color: #8b949e;
+      margin-top: 6px;
+    }
+    .btn {
+      background: #238636;
+      color: #ffffff;
+      border: 1px solid rgba(240, 246, 252, 0.1);
+      border-radius: 4px;
+      padding: 5px 12px;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+    .btn:hover {
+      background: #2ea043;
+    }
+  </style>
+</head>
+<body>
+  <h1>Pod Counter</h1>
+  <div class="card">
+    <div class="count" id="pod-count">-</div>
+    <div class="status" id="status">Connecting to Fleetglass bridge...</div>
+    <div class="status" id="context-info"></div>
+  </div>
+  <button type="button" class="btn" id="refresh-btn">Refresh</button>
+
+  <script src="main.js"></script>
+</body>
+</html>

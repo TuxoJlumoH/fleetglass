@@ -1,0 +1,16 @@
+PackageIdentifier: dev.fleetglass.Fleetglass
+PackageVersion: "@VERSION@"
+Platform:
+  - Windows.Desktop
+InstallModes:
+  - silent
+  - silentWithProgress
+  - interactive
+Installers:
+  - Architecture: x64
+    InstallerType: nullsoft
+    InstallerUrl: https://github.com/TuxoJlumoH/fleetglass/releases/download/v@VERSION@/Fleetglass_@VERSION@_x64-setup.exe
+    InstallerSha256: "@SHA256_WIN_EXE@"
+    Scope: user
+ManifestType: installer
+ManifestVersion: 1.6.0

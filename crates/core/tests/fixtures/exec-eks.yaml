@@ -1,0 +1,34 @@
+# aws eks get-token style exec plugin.
+apiVersion: v1
+kind: Config
+current-context: arn:aws:eks:eu-west-1:123456789012:cluster/demo
+clusters:
+  - name: arn:aws:eks:eu-west-1:123456789012:cluster/demo
+    cluster:
+      server: https://ABCDEF.gr7.eu-west-1.eks.amazonaws.com
+      certificate-authority-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCg==
+contexts:
+  - name: arn:aws:eks:eu-west-1:123456789012:cluster/demo
+    context:
+      cluster: arn:aws:eks:eu-west-1:123456789012:cluster/demo
+      user: arn:aws:eks:eu-west-1:123456789012:cluster/demo
+users:
+  - name: arn:aws:eks:eu-west-1:123456789012:cluster/demo
+    user:
+      exec:
+        apiVersion: client.authentication.k8s.io/v1beta1
+        command: aws
+        args:
+          - --region
+          - eu-west-1
+          - eks
+          - get-token
+          - --cluster-name
+          - demo
+          - --output
+          - json
+        env:
+          - name: AWS_PROFILE
+            value: demo-sso
+        interactiveMode: IfAvailable
+        provideClusterInfo: false

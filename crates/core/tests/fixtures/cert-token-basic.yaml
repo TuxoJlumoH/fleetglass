@@ -1,0 +1,40 @@
+# Client certificate (inline data), token file, basic auth, no credentials, dangling refs.
+apiVersion: v1
+kind: Config
+current-context: does-not-exist
+clusters:
+  - name: local
+    cluster:
+      server: https://127.0.0.1:6443
+contexts:
+  - name: cert
+    context:
+      cluster: local
+      user: cert-user
+  - name: token-file
+    context:
+      cluster: local
+      user: token-file-user
+  - name: basic
+    context:
+      cluster: local
+      user: basic-user
+  - name: anonymous
+    context:
+      cluster: local
+  - name: dangling
+    context:
+      cluster: missing-cluster
+      user: missing-user
+users:
+  - name: cert-user
+    user:
+      client-certificate-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCg==
+      client-key-data: LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCg==
+  - name: token-file-user
+    user:
+      tokenFile: /var/run/secrets/token
+  - name: basic-user
+    user:
+      username: admin
+      password: fixture-password

@@ -1,0 +1,27 @@
+[package]
+name = "bench"
+description = "Fleetglass performance harness (kind + kwok, budget checks)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# R-14b: mimalloc as the global allocator. `--no-default-features` builds the
+# glibc (system allocator) baseline for A/B; this is the only default feature.
+default = ["mimalloc"]
+mimalloc = ["dep:mimalloc"]
+
+[dependencies]
+anyhow.workspace = true
+fleetglass-core.workspace = true
+k8s-openapi.workspace = true
+mimalloc = { workspace = true, optional = true }
+serde.workspace = true
+serde_json = "1"
+tokio.workspace = true
+
+[lints]
+workspace = true

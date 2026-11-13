@@ -1,0 +1,19 @@
+# Maintainer: Fleetglass Contributors <https://github.com/TuxoJlumoH/fleetglass>
+pkgname=fleetglass-bin
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc="Fast, keyboard-first, multi-cluster Kubernetes desktop client"
+arch=('x86_64' 'aarch64')
+url="https://github.com/TuxoJlumoH/fleetglass"
+license=('Apache-2.0')
+depends=('gtk3' 'webkit2gtk-4.1' 'openssl' 'libappindicator-gtk3')
+provides=('fleetglass')
+conflicts=('fleetglass')
+source_x86_64=("${url}/releases/download/v${pkgver}/fleetglass_${pkgver}_amd64.deb")
+source_aarch64=("${url}/releases/download/v${pkgver}/fleetglass_${pkgver}_arm64.deb")
+sha256sums_x86_64=('@SHA256_AMD64@')
+sha256sums_aarch64=('@SHA256_ARM64@')
+
+package() {
+    tar -xf data.tar.xz -C "${pkgdir}"
+}

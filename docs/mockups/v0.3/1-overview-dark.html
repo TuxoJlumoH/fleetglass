@@ -1,0 +1,27 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="mobile.css"></head><body class=""><div class="phone">
+<div class="appbar">
+  <div class="ham"><svg class="i" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></div>
+  <div class="ctxsel"><span class="sw"></span><span class="nm">kind-fleetglass-dev</span><span class="dot ok" style="margin-left:2px"></span><span class="chev"><svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span></div>
+  <div class="act"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></div>
+</div>
+<div class="titlebar"><span class="t">Overview</span><span class="s">3 clusters</span><span class="btn sm">Last 1h<svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span></div>
+<div class="content"><div class="pad">
+  
+<div class="card" style="flex:1;border-left:3px solid #4c8dff">
+  <h4 style="color:var(--fg);font-size:14px;letter-spacing:0">kind-fleetglass-dev</h4>
+  <div class="body">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><span class="pill warn">3 issues</span></div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+      <div><div style="color:var(--fg-subtle);font-size:11px">NODES READY</div><div style="font-size:20px;font-weight:600">3/3</div></div>
+      <div><div style="color:var(--fg-subtle);font-size:11px">PODS</div><div style="font-size:20px;font-weight:600">38</div><div style="font-size:11.5px;color:var(--fg-muted)">running · <span style="color:var(--err)">3 failing</span></div></div>
+      <div><div style="color:var(--fg-subtle);font-size:11px">WARNINGS · 1H</div><div style="font-size:20px;font-weight:600;color:var(--warn)">7</div></div>
+    </div>
+    <div style="margin-top:12px"><div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:var(--fg-muted)">CPU</span><span>38% used · <span style="color:var(--fg-subtle)">61% requested</span></span></div><div class="bar" style="height:7px;margin-top:5px"><i class="req" style="width:61%"></i><i class="" style="width:38%"></i></div></div><div style="margin-top:12px"><div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:var(--fg-muted)">Memory</span><span>54% used · <span style="color:var(--fg-subtle)">72% requested</span></span></div><div class="bar" style="height:7px;margin-top:5px"><i class="req" style="width:72%"></i><i class="" style="width:54%"></i></div></div>
+  </div>
+</div>
+  <div style="display:flex;gap:8px;overflow:hidden">
+    <div class="card" style="flex:1;border-left:3px solid #a371f7;padding:10px 12px"><div style="font-weight:600">staging-eu</div><span class="pill warn" style="margin-top:6px">1 issue</span></div>
+    <div class="card" style="flex:1;border-left:3px solid #f85149;padding:10px 12px"><div style="font-weight:600;display:flex;gap:6px;align-items:center">prod-us<svg class="i" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div><span class="pill ok" style="margin-top:6px">Healthy</span></div>
+  </div>
+  <div class="card"><h4><svg class="i" viewBox="0 0 24 24"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17h.01"/></svg>NEEDS ATTENTION<span class="r">5</span></h4><div style="padding:10px 12px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:4px"><div style="display:flex;align-items:center;gap:8px"><span class="pill err">CrashLoopBackOff</span><span style="margin-left:auto;font-size:11.5px;color:var(--fg-subtle)">default</span></div><div style="font-weight:500">crashloop-6f7b9c-x8k2</div><div style="font-size:12px;color:var(--fg-muted)">14 restarts · Error (1) 4m ago</div></div><div style="padding:10px 12px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:4px"><div style="display:flex;align-items:center;gap:8px"><span class="pill err">ImagePullBackOff</span><span style="margin-left:auto;font-size:11.5px;color:var(--fg-subtle)">default</span></div><div style="font-weight:500">image-pull-7cd9-p2l8m</div><div style="font-size:12px;color:var(--fg-muted)">nginx:does-not-exist not found</div></div><div style="padding:10px 12px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:4px"><div style="display:flex;align-items:center;gap:8px"><span class="pill warn">Unschedulable</span><span style="margin-left:auto;font-size:11.5px;color:var(--fg-subtle)">default</span></div><div style="font-weight:500">pending-q2m4</div><div style="font-size:12px;color:var(--fg-muted)">0/3 nodes have enough CPU</div></div></div>
+</div></div><footer class="status"><span><span class="dot ok"></span>Connected</span><span>Updated 2s ago</span><div class="r"><span><svg class="i" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/></svg>Read-write</span></div></footer><nav class="bnav"><div class="on"><svg class="i" viewBox="0 0 24 24"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>Overview</div><div><svg class="i" viewBox="0 0 24 24"><path d="M12 2 3 7v10l9 5 9-5V7z"/><path d="M3 7l9 5 9-5M12 12v10"/></svg>Workloads</div><div><svg class="i" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>Events<span class="fail"></span></div><div><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>Settings</div></nav></div></body></html>

@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#16324f"/>
+      <stop offset="1" stop-color="#0a1626"/>
+    </linearGradient>
+    <radialGradient id="lens" cx="0.42" cy="0.38" r="0.7">
+      <stop offset="0" stop-color="#1f5a78"/>
+      <stop offset="1" stop-color="#0c2238"/>
+    </radialGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e8f4ff"/>
+      <stop offset="0.5" stop-color="#9fc4de"/>
+      <stop offset="1" stop-color="#5d86a6"/>
+    </linearGradient>
+    <linearGradient id="hex" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4fe0c8"/>
+      <stop offset="1" stop-color="#1fa894"/>
+    </linearGradient>
+    <linearGradient id="hexDim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2f8f9c"/>
+      <stop offset="1" stop-color="#1d5f70"/>
+    </linearGradient>
+    <clipPath id="lensClip"><circle cx="452" cy="452" r="232"/></clipPath>
+    <filter id="shadow" filterUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000" flood-opacity="0.45"/>
+    </filter>
+    <!-- pointy-top hexagon, circumradius 64 -->
+    <polygon id="h" points="0,-64 55.4,-32 55.4,32 0,64 -55.4,32 -55.4,-32"/>
+  </defs>
+
+  <!-- macOS icon body: 824x824 squircle-ish rounded rect on a 1024 grid -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+
+  <!-- faint fleet outside the lens -->
+  <g fill="#ffffff" opacity="0.06">
+    <use href="#h" x="250" y="760"/>
+    <use href="#h" x="378" y="760"/>
+    <use href="#h" x="760" y="250"/>
+    <use href="#h" x="760" y="378"/>
+  </g>
+
+  <!-- handle -->
+  <g filter="url(#shadow)">
+    <line x1="618" y1="618" x2="790" y2="790" stroke="#0a1626" stroke-width="96" stroke-linecap="round"/>
+    <line x1="618" y1="618" x2="790" y2="790" stroke="url(#ring)" stroke-width="72" stroke-linecap="round"/>
+  </g>
+
+  <!-- lens -->
+  <g filter="url(#shadow)">
+    <circle cx="452" cy="452" r="262" fill="url(#ring)"/>
+  </g>
+  <circle cx="452" cy="452" r="232" fill="url(#lens)"/>
+
+  <!-- fleet of clusters seen through the glass (honeycomb) -->
+  <g clip-path="url(#lensClip)">
+    <g fill="url(#hexDim)">
+      <use href="#h" x="285" y="342"/>
+      <use href="#h" x="619" y="342"/>
+      <use href="#h" x="341" y="630"/>
+      <use href="#h" x="563" y="630"/>
+      <use href="#h" x="452" y="246"/>
+    </g>
+    <g fill="url(#hex)">
+      <use href="#h" x="396" y="438"/>
+      <use href="#h" x="508" y="438"/>
+      <use href="#h" x="452" y="534"/>
+      <use href="#h" x="341" y="534"/>
+      <use href="#h" x="563" y="534"/>
+      <use href="#h" x="452" y="342"/>
+    </g>
+    <!-- glass glare -->
+    <path d="M 270 400 A 190 190 0 0 1 420 262" fill="none" stroke="#ffffff" stroke-opacity="0.55" stroke-width="22" stroke-linecap="round"/>
+    <ellipse cx="380" cy="330" rx="150" ry="90" transform="rotate(-35 380 330)" fill="#ffffff" opacity="0.07"/>
+  </g>
+</svg>

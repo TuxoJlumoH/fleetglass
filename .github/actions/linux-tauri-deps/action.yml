@@ -1,0 +1,19 @@
+name: Linux Tauri system dependencies
+description: >
+  Installs the Debian/Ubuntu packages Tauri 2 needs to compile on Linux (WebKitGTK 4.1 etc.).
+  Every job that builds crates/app on Linux (clippy and tests included) needs these.
+runs:
+  using: composite
+  steps:
+    - name: Install apt packages
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          build-essential \
+          libayatana-appindicator3-dev \
+          librsvg2-dev \
+          libssl-dev \
+          libwebkit2gtk-4.1-dev \
+          libxdo-dev \
+          patchelf

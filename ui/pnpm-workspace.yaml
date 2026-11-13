@@ -1,0 +1,2 @@
+# Standalone project; pnpm 12 reads settings from here (env/.npmrc store-dir is ignored).
+storeDir: ../.dev/pnpm-store

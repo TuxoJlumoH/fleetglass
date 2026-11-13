@@ -1,0 +1,50 @@
+{
+  "mode": "cluster",
+  "allocator": "mimalloc",
+  "contexts": [
+    "kwok-fleetglass-scale-1"
+  ],
+  "podsPerContext": {
+    "kwok-fleetglass-scale-1": 10000
+  },
+  "pods": 10000,
+  "clusters": 1,
+  "namespaces": 40,
+  "iterations": 50,
+  "projectAllMs": 0.0,
+  "firstPageRunsMs": [
+    60.189074000000005,
+    59.942724000000005,
+    60.140654000000005
+  ],
+  "firstPageMs": 60.189074000000005,
+  "firstRowsRunsMs": [
+    60.189074000000005,
+    59.942724000000005,
+    60.140654000000005
+  ],
+  "fullSyncRunsMs": [
+    780.475777,
+    816.422648,
+    791.855057
+  ],
+  "fullSyncMs": 816.422648,
+  "loadingQuerySamples": 388,
+  "loadingQueryP95Ms": 0.33260100000000004,
+  "loadingQueryMaxMs": 0.67489,
+  "queryP50Ms": 0.387454,
+  "queryP95Ms": 0.870966,
+  "queryMaxMs": 0.882868,
+  "baselineRssMb": 14.50390625,
+  "peakSyncRssMb": 123.3515625,
+  "idleRssMb": 123.3515625,
+  "idleSecs": 5,
+  "idleKbPerPod": 11.146,
+  "peakKbPerPod": 11.146,
+  "rssMb": 123.3515625,
+  "rssBudgetMb": 200.0,
+  "rssBudgetName": "Idle memory, 1 cluster",
+  "rssNote": "RSS of the bench process only (ClusterManager + watch stores); excludes the Tauri/WebKit baseline of the desktop app",
+  "budgetsPassed": true,
+  "budgetFailures": []
+}

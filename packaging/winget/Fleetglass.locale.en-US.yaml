@@ -1,0 +1,15 @@
+PackageIdentifier: dev.fleetglass.Fleetglass
+PackageVersion: "@VERSION@"
+PackageLocale: en-US
+Publisher: Fleetglass Contributors
+PackageName: Fleetglass
+License: Apache-2.0
+ShortDescription: Fast, keyboard-first, multi-cluster Kubernetes desktop client
+Moniker: fleetglass
+Tags:
+  - kubernetes
+  - k8s
+  - cluster
+  - desktop
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0
