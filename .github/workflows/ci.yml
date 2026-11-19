@@ -167,6 +167,16 @@ jobs:
       FG_KIND_API_ADDRESS: 127.0.0.1
       FG_KIND_API_PORT: "7443"
     steps:
+      # Debug integration build + release bench build + kind images exceed the runner's free disk.
+      # Drop preinstalled SDKs this job never uses.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL /usr/share/swift /usr/local/share/powershell
+          sudo docker image prune --all --force >/dev/null
+          df -h /
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -223,6 +233,7 @@ jobs:
 
       - name: Scale cluster with kwok and assert perf budgets
         run: |
+          df -h /
           scripts/scale-cluster.sh up --pods 1000
           cargo run -p bench --release --locked -- --pods 10000 --assert-budgets
 
