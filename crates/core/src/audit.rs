@@ -92,7 +92,14 @@ impl SidecarLock {
                         path: lock_path.to_path_buf(),
                     });
                 }
-                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                // On Windows, creating a file whose previous holder is still being deleted
+                // (delete pending) fails with ERROR_ACCESS_DENIED instead of AlreadyExists.
+                Err(err)
+                    if err.kind() == std::io::ErrorKind::AlreadyExists
+                        || (cfg!(windows)
+                            && err.kind() == std::io::ErrorKind::PermissionDenied
+                            && start.elapsed() < timeout) =>
+                {
                     attempts = attempts.saturating_add(1);
                     // Check for stale lock after several failed attempts.
                     if attempts.is_multiple_of(10)

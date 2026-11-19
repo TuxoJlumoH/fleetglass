@@ -4579,6 +4579,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        windows,
+        ignore = "Windows timer resolution (~15.6ms) stretches the 2ms writer sleeps past the 250ms window"
+    )]
     async fn subscription_batches_rapid_updates_to_at_most_10_per_sec() {
         let manager = dummy_manager(DEFAULT_IDLE_TIMEOUT);
         let store = manager.get_or_create_store("c1", "Pod");
@@ -4766,6 +4770,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        windows,
+        ignore = "connect to a closed port takes ~2s on Windows (SYN retries) while paused time auto-advances past the deadline"
+    )]
     async fn watcher_backoff_exponential_growth_on_unreachable_endpoint() {
         tokio::time::pause();
         let (manager, dir) = unreachable_manager(DEFAULT_IDLE_TIMEOUT);

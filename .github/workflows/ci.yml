@@ -154,6 +154,12 @@ jobs:
             cargo build -p fleetglass-app --release --locked
           fi
 
+      # Same exclusion as the Release workflow: the fleetglass-app test binary has no Common
+      # Controls v6 manifest on Windows and cannot start.
+      - name: Unit tests (Windows)
+        if: runner.os == 'Windows'
+        run: cargo test --workspace --locked --exclude fleetglass-app
+
   integration:
     name: Integration (kind)
     if: github.event.pull_request.draft != true
