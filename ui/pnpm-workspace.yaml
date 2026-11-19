@@ -1,2 +1,6 @@
 # Standalone project; pnpm 12 reads settings from here (env/.npmrc store-dir is ignored).
 storeDir: ../.dev/pnpm-store
+
+# Security: minimatch < 11.0.1 (GHSA, ReDoS via globparts amplification); dev-only via eslint.
+overrides:
+  minimatch@<11.0.1: ^11.0.1
