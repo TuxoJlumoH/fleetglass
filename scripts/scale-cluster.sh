@@ -143,18 +143,61 @@ ensure_kwok() {
     ctrl="$(fetch_pinned "$FG_KWOK_URL" "$FG_KWOK_SHA256")"
     stages="$(fetch_pinned "$FG_KWOK_STAGES_URL" "$FG_KWOK_STAGES_SHA256")"
     log "installing kwok controller $FG_KWOK_VERSION (kube-system/kwok-controller)"
-    if command -v docker >/dev/null 2>&1 && command -v kind >/dev/null 2>&1; then
-      docker pull "registry.k8s.io/kwok/kwok:$FG_KWOK_VERSION" >/dev/null 2>&1 || true
-      docker pull "registry.k8s.io/pause:3.10" >/dev/null 2>&1 || true
-      kind load docker-image "registry.k8s.io/kwok/kwok:$FG_KWOK_VERSION" --name "$FG_CLUSTER_NAME" >/dev/null 2>&1 || true
-      kind load docker-image "registry.k8s.io/pause:3.10" --name "$FG_CLUSTER_NAME" >/dev/null 2>&1 || true
-    fi
+    preload_image "registry.k8s.io/kwok/kwok:$FG_KWOK_VERSION"
+    preload_image "registry.k8s.io/pause:3.10"
     k apply --server-side --force-conflicts -f "$ctrl" >/dev/null
     k wait --for condition=established --timeout=60s crd/stages.kwok.x-k8s.io >/dev/null
     k apply --server-side --force-conflicts -f "$stages" >/dev/null
   fi
   k -n kube-system rollout status deploy/kwok-controller --timeout=300s >/dev/null \
-    || { k -n kube-system describe deploy/kwok-controller || true; k -n kube-system get pods -A || true; die "kwok-controller rollout failed"; }
+    || {
+      k -n kube-system describe pods -l app=kwok-controller || true
+      k -n kube-system get events --field-selector involvedObject.kind=Pod --sort-by=.lastTimestamp | tail -n 20 || true
+      die "kwok-controller rollout failed"
+    }
+}
+
+# Images present in the kind node's containerd (all nodes of our cluster).
+node_has_image() {
+  local img="$1" node
+  for node in $(kind get nodes --name "$FG_CLUSTER_NAME"); do
+    docker exec "$node" crictl inspecti "$img" >/dev/null 2>&1 || return 1
+  done
+}
+
+# Make an image available inside the kind nodes so the kubelet never has to pull it.
+# With Docker's containerd image store, `kind load docker-image` fails on multi-platform images
+# ("content digest ... not found": only one platform's layers are local), so export a
+# single-platform archive and load that. Fallback: pull inside each node with crictl.
+# Retries cover transient registry errors; fails loudly instead of an ImagePullBackOff later.
+preload_image() {
+  local img="$1" platform="linux/amd64" attempt node tar
+  case "$(docker info --format '{{.Architecture}}' 2>/dev/null)" in aarch64 | arm64) platform="linux/arm64" ;; esac
+  node_has_image "$img" && { info "image present in node: $img"; return 0; }
+  mkdir -p "$FG_CACHE_DIR"
+  tar="$FG_CACHE_DIR/preload-image.tar"
+  for attempt in 1 2 3; do
+    if docker pull --quiet --platform "$platform" "$img" >/dev/null \
+      && docker save --platform "$platform" -o "$tar" "$img" \
+      && kind load image-archive "$tar" --name "$FG_CLUSTER_NAME" >/dev/null \
+      && node_has_image "$img"; then
+      rm -f "$tar"
+      info "image loaded via kind: $img"
+      return 0
+    fi
+    rm -f "$tar"
+    warn "kind load of $img failed (attempt $attempt/3); retrying"
+    sleep $((attempt * 5))
+  done
+  for attempt in 1 2 3; do
+    for node in $(kind get nodes --name "$FG_CLUSTER_NAME"); do
+      docker exec "$node" crictl pull "$img" >/dev/null || true
+    done
+    node_has_image "$img" && { info "image pulled inside node: $img"; return 0; }
+    warn "in-node pull of $img failed (attempt $attempt/3); retrying"
+    sleep $((attempt * 10))
+  done
+  die "could not make $img available in the kind node(s) (check registry access from the runner)"
 }
 
 # Sum of ready replicas over the scale Deployments.
