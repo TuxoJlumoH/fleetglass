@@ -14,7 +14,7 @@ publish = false
 fleetglass-core = { path = "crates/core" }
 
 # Kubernetes. kube 4.2 requires k8s-openapi 0.28; `latest` = v1_36 there.
-kube = { version = "4.2.0", default-features = false, features = [
+kube = { version = "5.0.0", default-features = false, features = [
     "client",
     "config",
     "runtime",
