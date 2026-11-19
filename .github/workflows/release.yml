@@ -58,8 +58,17 @@ jobs:
 
       - uses: ./.github/actions/setup-ui
 
+      # On Windows the fleetglass-app test binary has no Common Controls v6 manifest (tauri-build
+      # embeds it only for the app binary), so it exits with STATUS_ENTRYPOINT_NOT_FOUND. Those
+      # tests run on Linux and macOS; Windows tests every other crate.
       - name: Verify Rust formatting and unit tests
-        run: cargo fmt --all --check && cargo test --workspace --locked
+        run: |
+          cargo fmt --all --check
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cargo test --workspace --locked --exclude fleetglass-app
+          else
+            cargo test --workspace --locked
+          fi
 
       - name: Build Tauri release bundles
         env:
