@@ -45,7 +45,7 @@ tauri-specta = { version = "=2.0.0-rc.26", features = ["derive", "typescript"] }
 [target.'cfg(target_os = "android")'.dependencies]
 # Bytes over the Kotlin plugin bridge (JSON) for Keystore seal/open and the document picker
 # (03-02b). MIT OR Apache-2.0; already in Cargo.lock via tauri/kube, so no new code is pulled in.
-base64 = "0.22"
+base64 = "0.23"
 
 [lints]
 workspace = true

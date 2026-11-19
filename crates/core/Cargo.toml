@@ -36,7 +36,7 @@ flate2 = "1"
 tar = { version = "0.4", default-features = false }
 # MIT OR Apache-2.0. Encodes the CA of a "paste token" context into certificate-authority-data
 # (03-02a). Already in the tree via kube-client (same 0.22), so no new crate is built.
-base64 = "0.22"
+base64 = "0.23"
 # Release candidate, pinned exactly; must match the version used by tauri-specta in crates/app.
 specta = { version = "=2.0.0-rc.26", features = ["derive"], optional = true }
 x509-parser = "0.18.1"
