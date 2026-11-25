@@ -492,6 +492,7 @@ export interface PortForwardBarProps {
   forwards: PortForwardItem[];
   onStop: (id: number) => void;
   onStart?: (localPort: number, remotePort: number) => void;
+  onOpenInBrowser?: (url: string) => void | Promise<void>;
   saved?: SavedPortForward[];
   onBookmarkToggle?: (forward: PortForwardItem) => void;
   onStartSaved?: (saved: SavedPortForward) => void;
@@ -502,7 +503,13 @@ export interface PortForwardBarProps {
  * The webview has no new-window handler and the app ships no opener plugin, so a
  * `target=_blank` link would do nothing. Show the local URL and copy it instead.
  */
-function CopyUrlButton({ url }: { url: string }) {
+export function CopyUrlButton({
+  url,
+  showUrl = true,
+}: {
+  url: string;
+  showUrl?: boolean;
+}) {
   const [status, setStatus] = useState<"idle" | "copied" | "failed">("idle");
   const copy = () => {
     // `navigator.clipboard` is missing in insecure contexts / old webviews.
@@ -521,7 +528,7 @@ function CopyUrlButton({ url }: { url: string }) {
   };
   return (
     <>
-      <code className="pf-bar__url">{url}</code>
+      {showUrl && <code className="pf-bar__url">{url}</code>}
       <button
         type="button"
         className="pf-bar__link"
@@ -539,9 +546,60 @@ function CopyUrlButton({ url }: { url: string }) {
   );
 }
 
+/**
+ * Safely launches the URL in the system default browser via Tauri IPC (`05-05`).
+ */
+export function OpenInBrowserButton({
+  url,
+  onOpen,
+}: {
+  url: string;
+  onOpen?: ((url: string) => void | Promise<void>) | undefined;
+}) {
+  const [error, setError] = useState<string | null>(null);
+
+  const handleClick = async () => {
+    setError(null);
+    try {
+      if (onOpen) {
+        await onOpen(url);
+      } else {
+        const res = await commands.openInBrowser(url);
+        if (res.status === "error") {
+          setError(res.error.message);
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        className="pf-bar__open-btn"
+        aria-label={`Open in browser ${url}`}
+        title={`Open ${url} in default browser`}
+        onClick={() => {
+          void handleClick();
+        }}
+      >
+        Open in browser
+      </button>
+      {error !== null && (
+        <span role="alert" className="pf-bar__copy-error" title={error}>
+          Could not open: {error}
+        </span>
+      )}
+    </>
+  );
+}
+
 export function PortForwardBar({
   forwards,
   onStop,
+  onOpenInBrowser,
   saved: savedProp,
   onBookmarkToggle,
   onStartSaved,
@@ -620,6 +678,7 @@ export function PortForwardBar({
                   </span>
                 )}
                 <CopyUrlButton url={f.browserUrl} />
+                <OpenInBrowserButton url={f.browserUrl} onOpen={onOpenInBrowser} />
                 <button
                   type="button"
                   aria-label={`Stop forward ${String(f.localPort)}`}

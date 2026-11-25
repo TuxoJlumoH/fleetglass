@@ -40,6 +40,8 @@ base64 = "0.23"
 # Release candidate, pinned exactly; must match the version used by tauri-specta in crates/app.
 specta = { version = "=2.0.0-rc.26", features = ["derive"], optional = true }
 x509-parser = "0.18.1"
+# Apache-2.0 OR MIT. Validates browser launcher URLs against loopback and Ingress/Gateway rules (05-05). Already in lockfile via Tauri.
+url = "2"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

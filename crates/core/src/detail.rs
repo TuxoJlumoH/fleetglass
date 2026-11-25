@@ -1318,6 +1318,8 @@ pub async fn fetch_resource_detail(
         crate::cert::inspect_resource_certificates(client, kind, res_namespace.as_deref(), &val)
             .await;
 
+    let (endpoints, endpoints_truncated) = crate::endpoints::resource_endpoints(kind, &val);
+
     Ok(ResourceDetail {
         uid,
         cluster: cluster.to_owned(),
@@ -1330,6 +1332,8 @@ pub async fn fetch_resource_detail(
         events_truncated,
         pod,
         certificates,
+        endpoints,
+        endpoints_truncated,
     })
 }
 

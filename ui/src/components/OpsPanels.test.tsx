@@ -6,6 +6,7 @@ import { DiagnosticsModal } from "./DiagnosticsModal";
 import {
   ClusterNoticeBanner,
   ExecShellPanel,
+  OpenInBrowserButton,
   PortForwardBar,
 } from "./OpsPanels";
 
@@ -163,6 +164,7 @@ describe("P1-02, P1-03, P1-09, P1-10, P1-13 Ops panels and diagnostics", () => {
   it("P1-10: PortForwardBar renders active forwards with browserUrl and calls onStop(id) when Stop is clicked", async () => {
     const user = userEvent.setup();
     const onStop = vi.fn();
+    const onOpen = vi.fn();
 
     render(
       <PortForwardBar
@@ -178,7 +180,8 @@ describe("P1-02, P1-03, P1-09, P1-10, P1-13 Ops panels and diagnostics", () => {
           },
         ]}
         onStop={onStop}
-      />,
+        onOpenInBrowser={onOpen}
+      />
     );
 
     const item = screen.getByTestId("pf-item-42");
@@ -187,6 +190,15 @@ describe("P1-02, P1-03, P1-09, P1-10, P1-13 Ops panels and diagnostics", () => {
     // No dead `target=_blank` link: the URL is shown and copied.
     expect(within(item).queryByRole("link")).not.toBeInTheDocument();
     expect(within(item).getByText("http://127.0.0.1:8080")).toBeInTheDocument();
+
+    // Open in browser button
+    const openBtn = within(item).getByRole("button", {
+      name: "Open in browser http://127.0.0.1:8080",
+    });
+    expect(openBtn).toBeInTheDocument();
+    await user.click(openBtn);
+    expect(onOpen).toHaveBeenCalledWith("http://127.0.0.1:8080");
+
     const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
     await user.click(
       within(item).getByRole("button", { name: "Copy URL http://127.0.0.1:8080" }),
@@ -455,5 +467,24 @@ describe("P1-02, P1-03, P1-09, P1-10, P1-13 Ops panels and diagnostics", () => {
       },
       confirmedName: null,
     });
+  });
+
+  it("05-05: OpenInBrowserButton renders role=alert error message when commands.openInBrowser returns error", async () => {
+    const user = userEvent.setup();
+    const openSpy = vi.spyOn(commands, "openInBrowser").mockResolvedValue({
+      status: "error",
+      error: { kind: "invalidInput", message: "invalid browser URL: loopback endpoint must specify an explicit port" },
+    } as never);
+
+    render(<OpenInBrowserButton url="http://127.0.0.1" />);
+
+    const btn = screen.getByRole("button", { name: "Open in browser http://127.0.0.1" });
+    await user.click(btn);
+
+    expect(openSpy).toHaveBeenCalledWith("http://127.0.0.1");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Could not open: invalid browser URL: loopback endpoint must specify an explicit port",
+    );
   });
 });

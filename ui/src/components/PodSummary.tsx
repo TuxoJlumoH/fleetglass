@@ -9,6 +9,7 @@ import type {
 } from "../generated/bindings";
 import type { Row } from "../stores/pods";
 import { useResourceDetailStore } from "../stores/resourceDetail";
+import { ActivePortForwardsCard } from "./ActivePortForwards";
 import { ICON_SIZE, ICON_STROKE, KindIcon } from "./KindIcon";
 import { PortForwardForm } from "./PortForwardForm";
 import type { DrawerTab } from "./ResourceDrawer";
@@ -28,6 +29,7 @@ export interface PodSummaryProps {
   portForwardContainer?: string | null;
   /** False hides Shell and Port-forward (not available on Android 0.3). */
   remoteOps?: boolean;
+  onOpenInBrowser?: ((url: string) => void | Promise<void>) | undefined;
 }
 
 function conditionTooltip(cond: ConditionSummary): string {
@@ -131,6 +133,7 @@ export function PodSummary({
   onPortForward,
   portForwardContainer,
   remoteOps = true,
+  onOpenInBrowser,
 }: PodSummaryProps) {
   const pod = podProp ?? detail.pod;
   const [ownPfContainer, setOwnPfContainer] = useState<string | null>(null);
@@ -256,6 +259,15 @@ export function PodSummary({
           </dl>
         </div>
       </div>
+
+      {remoteOps && row.namespace && (
+        <ActivePortForwardsCard
+          context={row.cluster}
+          namespace={row.namespace}
+          pod={row.name}
+          onOpenInBrowser={onOpenInBrowser}
+        />
+      )}
 
       {/* 2. CONDITIONS CARD */}
       <div className="card" data-testid="pod-conditions-card">
