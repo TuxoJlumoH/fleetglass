@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="Licence: Apache-2.0" src="https://img.shields.io/badge/licence-Apache--2.0-blue"></a>
-  <a href="https://github.com/TuxoJlumoH/fleetglass/releases"><img alt="Version: 0.4.0" src="https://img.shields.io/badge/release-v0.4.0-green"></a>
+  <a href="https://github.com/TuxoJlumoH/fleetglass/releases"><img alt="Version: 0.5.0" src="https://img.shields.io/badge/release-v0.5.0-green"></a>
   <img alt="Platforms: Linux | macOS | Windows | Android" src="https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20Android-lightgrey">
   <img alt="Built with Tauri 2 + Rust" src="https://img.shields.io/badge/built%20with-Tauri%202%20%2B%20Rust-dea584">
 </p>
@@ -85,7 +85,7 @@ Download pre-built binaries from [Releases](https://github.com/TuxoJlumoH/fleetg
 | Platform | Package | Notes |
 |---|---|---|
 | **Android** (10+, API 29+) | `fleetglass-android-arm64-v8a.apk`<br>`fleetglass-android-x86_64.apk` | Standalone client. See [Android Verification Guide](docs/VERIFYING_APK.md). |
-| **Linux** (x64 / ARM64) | `.AppImage`, `.deb`, `.rpm` (`amd64`/`x86_64` or `arm64`/`aarch64`) | Flatpak and AUR are planned for v0.5. |
+| **Linux** (x64 / ARM64) | `.AppImage`, `.deb`, `.rpm` (`amd64`/`x86_64` or `arm64`/`aarch64`) | Flatpak and AUR are planned. |
 | **macOS** (Apple Silicon / Intel) | `Fleetglass_<version>_aarch64.dmg` / `Fleetglass_<version>_x64.dmg` | Not notarized yet: run `xattr -dr com.apple.quarantine /Applications/Fleetglass.app`, or **System Settings → Privacy & Security → Open Anyway**. Intel builds start with v0.4.1. |
 | **Windows** (10/11 x64) | `Fleetglass_<version>_x64-setup.exe` or `.msi` | SmartScreen warning on first launch: **More info → Run anyway**. |
 
@@ -129,16 +129,15 @@ The frontend never receives unbounded JSON payloads; the Rust backend executes w
 
 ---
 
-## Roadmap (Phase 0.5 & Beyond)
+## Roadmap
 
-Next up for **v0.5.0** ([details](docs/PLAN.md#phase-05-distribution-packaging--daily-driver-polish-active-2026-11-13)):
+Shipped in **v0.5.0**: per-namespace watcher fallback, in-app PTY terminal, split view, YAML schema
+validation and autocomplete, and Open in browser. See the [changelog](CHANGELOG.md).
 
-- **Signed In-App Auto-Updater:** `tauri-plugin-updater` with ECDSA signature verification.
+Next up ([details](docs/PLAN.md#phase-05-distribution-packaging--daily-driver-polish-active-2026-11-13)):
+
+- **Signed In-App Auto-Updater:** `tauri-plugin-updater` with signature verification.
 - **Expanded Packaging:** Flatpak, AUR (`PKGBUILD`), Homebrew Cask and winget.
-- **Per-Namespace Watcher Fallback:** Graceful fallback to watching accessible namespaces on RBAC 403 Forbidden.
-- **In-App PTY Terminal:** Embedded `xterm.js` with dynamic PTY window resize signals alongside external terminal handoff.
-- **Split View Layout:** Resizable horizontal and vertical split panes for simultaneous side-by-side inspection.
-- **Schema Validation & Autocomplete:** Kubernetes OpenAPI JSONSchema diagnostics inside the CodeMirror 6 YAML editor.
 
 ---
 
