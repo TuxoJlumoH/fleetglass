@@ -20,6 +20,7 @@ pub mod import;
 pub mod logs_v2;
 pub mod overview;
 pub mod prometheus;
+pub mod schema;
 pub mod update;
 
 pub use crate::cert::CertificateInfo;
@@ -30,6 +31,7 @@ pub use import::{ImportCandidate, ImportPreview, ImportProblem};
 pub use logs_v2::*;
 pub use overview::*;
 pub use prometheus::*;
+pub use schema::{ResourceSchemaResult, SchemaUnavailableReason};
 pub use update::UpdateInfo;
 
 /// Build information shown in the UI.

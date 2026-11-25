@@ -2560,6 +2560,8 @@ pub struct ClusterManager {
     foreground: Arc<watch::Sender<bool>>,
     /// Serializes `set_foreground` calls.
     foreground_mutex: Arc<tokio::sync::Mutex<()>>,
+    /// Parsed OpenAPI v3 group-version documents for the YAML editor (05-04).
+    schema_cache: Arc<crate::schema::SchemaCache>,
 }
 
 impl ClusterManager {
@@ -2586,6 +2588,7 @@ impl ClusterManager {
             next_sub_id: Arc::new(AtomicU32::new(1)),
             foreground: Arc::new(watch::channel(true).0),
             foreground_mutex: Arc::new(tokio::sync::Mutex::new(())),
+            schema_cache: Arc::new(crate::schema::SchemaCache::default()),
         }
     }
 
@@ -3421,6 +3424,7 @@ impl ClusterManager {
     ///
     /// Returns `true` if an entry was present and removed, `false` otherwise.
     pub fn invalidate_client(&self, context: &str) -> bool {
+        self.schema_cache.invalidate_context(context);
         self.metrics_clients
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -3438,6 +3442,60 @@ impl ClusterManager {
                 store.resync();
             }
         }
+    }
+
+    /// JSON schema of `api_version`/`kind` from the cluster's OpenAPI v3 document (05-04).
+    ///
+    /// Never fails: a missing permission, an old or offline cluster or an unknown kind
+    /// is reported as [`ResourceSchemaResult::Unavailable`]. Documents are cached per
+    /// (context, group-version) until the server's document hash changes or the
+    /// context reconnects ([`Self::invalidate_client`]).
+    pub async fn resource_schema(
+        &self,
+        context: &str,
+        api_version: &str,
+        kind: &str,
+    ) -> crate::api::ResourceSchemaResult {
+        let client = match self.connect_client(context).await {
+            Ok(client) => client,
+            Err(err) => {
+                return crate::schema::SchemaError::Unreachable(sanitize_error(&err)).into();
+            }
+        };
+        match crate::schema::fetch_resource_schema(
+            &client,
+            &self.schema_cache,
+            context,
+            api_version,
+            kind,
+        )
+        .await
+        {
+            Ok(resolved) => {
+                match crate::schema::serialize_bounded(&resolved, crate::schema::MAX_SCHEMA_BYTES) {
+                    Some((schema_json, truncated)) => crate::api::ResourceSchemaResult::Available {
+                        api_version: api_version.to_owned(),
+                        kind: kind.to_owned(),
+                        schema_json,
+                        truncated,
+                    },
+                    None => {
+                        crate::schema::SchemaError::SchemaTooLarge(format!("{api_version} {kind}"))
+                            .into()
+                    }
+                }
+            }
+            Err(err) => {
+                tracing::debug!(context, api_version, kind, error = %err, "resource schema unavailable");
+                err.into()
+            }
+        }
+    }
+
+    /// Number of OpenAPI documents in the schema cache (diagnostics and tests).
+    #[must_use]
+    pub fn schema_cache_len(&self) -> usize {
+        self.schema_cache.len()
     }
 
     /// Client for the `metrics.k8s.io` pollers of `context`: same kubeconfig
@@ -4836,6 +4894,38 @@ mod tests {
         assert_eq!(manager.client_builds(), 2);
         assert!(manager.clients.lock().unwrap().contains_key("closed"));
 
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn resource_schema_of_unreachable_or_unknown_context_is_unavailable() {
+        use crate::api::{ResourceSchemaResult, SchemaUnavailableReason};
+        let (manager, dir) = unreachable_manager(DEFAULT_IDLE_TIMEOUT);
+        for (context, api_version, expected) in [
+            ("closed", "apps/v1", SchemaUnavailableReason::Unreachable),
+            (
+                "no-such-context",
+                "apps/v1",
+                SchemaUnavailableReason::Unreachable,
+            ),
+            ("closed", "apps/", SchemaUnavailableReason::NotFound),
+        ] {
+            let result = tokio::time::timeout(
+                Duration::from_secs(60),
+                manager.resource_schema(context, api_version, "Deployment"),
+            )
+            .await
+            .unwrap();
+            match result {
+                ResourceSchemaResult::Unavailable { reason, message } => {
+                    assert_eq!(reason, expected, "{context} {api_version}: {message}");
+                    assert!(!message.is_empty());
+                    assert!(!message.contains("not-a-secret"));
+                }
+                other => panic!("expected unavailable, got {other:?}"),
+            }
+        }
+        assert_eq!(manager.schema_cache_len(), 0);
         let _ = std::fs::remove_dir_all(dir);
     }
 
