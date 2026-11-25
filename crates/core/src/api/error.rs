@@ -289,12 +289,11 @@ mod tests {
         let secret = "SECRET_TOKEN_XYZ123";
         let auth_err = kube::client::AuthError::AuthExecRun {
             cmd: format!("aws-iam-authenticator --token {secret}"),
-            status,
-            out: Output {
+            out: Box::new(Output {
                 status,
                 stdout: format!("leaked stdout {secret}").into_bytes(),
                 stderr: format!("leaked stderr {secret}").into_bytes(),
-            },
+            }),
         };
         let core_err = Error::Kube(kube::Error::Auth(auth_err));
         let ipc = IpcError::from(&core_err);

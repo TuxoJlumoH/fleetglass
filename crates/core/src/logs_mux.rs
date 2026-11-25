@@ -263,30 +263,38 @@ pub(crate) async fn resolve_label_selector(
     let not_found = || format!("{kind} {namespace}/{name} has no spec.selector");
     let read_err = |err: kube::Error| format!("cannot read {kind} {namespace}/{name}: {err}");
     let label_selector = match kind.to_ascii_lowercase().as_str() {
-        "deployment" => Api::<Deployment>::namespaced(client.clone(), namespace)
-            .get(name)
-            .await
-            .map_err(read_err)?
-            .spec
-            .map(|s| s.selector),
-        "statefulset" => Api::<StatefulSet>::namespaced(client.clone(), namespace)
-            .get(name)
-            .await
-            .map_err(read_err)?
-            .spec
-            .map(|s| s.selector),
-        "daemonset" => Api::<DaemonSet>::namespaced(client.clone(), namespace)
-            .get(name)
-            .await
-            .map_err(read_err)?
-            .spec
-            .map(|s| s.selector),
-        "replicaset" => Api::<ReplicaSet>::namespaced(client.clone(), namespace)
-            .get(name)
-            .await
-            .map_err(read_err)?
-            .spec
-            .map(|s| s.selector),
+        "deployment" => Some(
+            Api::<Deployment>::namespaced(client.clone(), namespace)
+                .get(name)
+                .await
+                .map_err(read_err)?
+                .spec
+                .selector,
+        ),
+        "statefulset" => Some(
+            Api::<StatefulSet>::namespaced(client.clone(), namespace)
+                .get(name)
+                .await
+                .map_err(read_err)?
+                .spec
+                .selector,
+        ),
+        "daemonset" => Some(
+            Api::<DaemonSet>::namespaced(client.clone(), namespace)
+                .get(name)
+                .await
+                .map_err(read_err)?
+                .spec
+                .selector,
+        ),
+        "replicaset" => Some(
+            Api::<ReplicaSet>::namespaced(client.clone(), namespace)
+                .get(name)
+                .await
+                .map_err(read_err)?
+                .spec
+                .selector,
+        ),
         "job" => Api::<Job>::namespaced(client.clone(), namespace)
             .get(name)
             .await

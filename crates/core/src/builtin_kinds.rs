@@ -59,12 +59,7 @@ fn extract_meta_fields(
 pub fn project_replica_set(rs: &ReplicaSet, cluster: &str) -> Row {
     let (uid, name, namespace, labels, created) = extract_meta_fields(&rs.metadata);
 
-    let desired_i32 = rs
-        .spec
-        .as_ref()
-        .and_then(|s| s.replicas)
-        .unwrap_or(0)
-        .max(0);
+    let desired_i32 = rs.spec.replicas.unwrap_or(0).max(0);
     let ready_i32 = rs
         .status
         .as_ref()
@@ -1067,10 +1062,10 @@ mod tests {
                 namespace: Some("default".into()),
                 ..Default::default()
             },
-            spec: Some(k8s_openapi::api::apps::v1::ReplicaSetSpec {
+            spec: k8s_openapi::api::apps::v1::ReplicaSetSpec {
                 replicas: Some(3),
                 ..Default::default()
-            }),
+            },
             status: Some(k8s_openapi::api::apps::v1::ReplicaSetStatus {
                 replicas: 3,
                 ready_replicas: Some(3),

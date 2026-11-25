@@ -269,7 +269,7 @@ async fn live_metrics_usage_and_not_installed() {
         .await
         .expect("metrics-server deployment on fleetglass-dev")
         .spec
-        .and_then(|s| s.replicas)
+        .replicas
         .unwrap_or(1)
         .max(1);
 

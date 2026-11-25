@@ -1563,12 +1563,7 @@ fn extract_metadata(
 fn project_stateful_set(ss: &StatefulSet, cluster: &str) -> Row {
     let (uid, name, namespace, labels, created) = extract_metadata(&ss.metadata);
 
-    let desired_i32 = ss
-        .spec
-        .as_ref()
-        .and_then(|s| s.replicas)
-        .unwrap_or(1)
-        .max(0);
+    let desired_i32 = ss.spec.replicas.unwrap_or(1).max(0);
     let ready_i32 = ss
         .status
         .as_ref()
@@ -1830,9 +1825,10 @@ fn find_matching_resource_with_version(
 pub(crate) fn sanitize_kube_error(err: &kube::Error) -> String {
     match err {
         kube::Error::Auth(auth_err) => match auth_err {
-            AuthError::AuthExecRun { status, .. } => {
+            AuthError::AuthExecRun { out, .. } => {
                 format!(
-                    "authentication failed: exec credential plugin failed (exit status {status})"
+                    "authentication failed: exec credential plugin failed (exit status {})",
+                    out.status
                 )
             }
             AuthError::AuthExecStart(source) => {
@@ -4744,8 +4740,7 @@ mod tests {
 
         let auth_err = kube::client::AuthError::AuthExecRun {
             cmd: fake_cmd,
-            status,
-            out: fake_out,
+            out: Box::new(fake_out),
         };
         let kube_err = kube::Error::Auth(auth_err);
         let sanitized = sanitize_kube_error(&kube_err);
