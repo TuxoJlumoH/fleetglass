@@ -603,7 +603,7 @@ async fn run_previous(
                 Ok(0) => break,
                 Ok(_) => {
                     let line = String::from_utf8_lossy(&buf);
-                    if line.starts_with("unable to retrieve container logs") {
+                    if is_kubelet_missing_log_line(&line) {
                         let message = format!(
                             "No previous container logs for {container} (the container was removed)"
                         );
@@ -750,6 +750,14 @@ async fn run_follower(
             }
         }
     }
+}
+
+/// The kubelet reports a garbage-collected previous container log as a plain log line
+/// rather than an API error; recognise both wordings it uses.
+fn is_kubelet_missing_log_line(line: &str) -> bool {
+    line.starts_with("unable to retrieve container logs")
+        || (line.starts_with("failed to try resolving symlinks in path")
+            && line.contains("no such file or directory"))
 }
 
 #[cfg(test)]
@@ -1169,6 +1177,21 @@ mod tests {
         let lp = previous_log_params("app", &t);
         assert_eq!(lp.since_seconds, Some(i64::from(MAX_SINCE_SECONDS)));
         assert_eq!(lp.tail_lines, None);
+    }
+
+    #[test]
+    fn kubelet_missing_log_lines_are_recognised() {
+        assert!(is_kubelet_missing_log_line(
+            "unable to retrieve container logs for containerd://abc"
+        ));
+        assert!(is_kubelet_missing_log_line(
+            "failed to try resolving symlinks in path \"/var/log/pods/ns_p_uid/main/0.log\": \
+             lstat /var/log/pods/ns_p_uid/main/0.log: no such file or directory"
+        ));
+        assert!(!is_kubelet_missing_log_line(
+            "failed to try resolving symlinks is my app log"
+        ));
+        assert!(!is_kubelet_missing_log_line("crashing on purpose"));
     }
 
     #[test]
