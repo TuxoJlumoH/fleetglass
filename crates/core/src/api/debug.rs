@@ -53,6 +53,10 @@ pub struct DebugNodeRequest {
     pub command: Vec<String>,
     pub confirmed_name: Option<String>,
     pub namespace: Option<String>,
+    #[serde(default)]
+    pub cols: Option<u16>,
+    #[serde(default)]
+    pub rows: Option<u16>,
 }
 
 /// Result of creating a node debug pod.

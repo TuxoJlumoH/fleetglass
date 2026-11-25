@@ -5,6 +5,25 @@ import { resetBackLayers } from "../lib/backLayers";
 import { LAST_SELECTION_STORAGE_KEY, resetLastSelectionState } from "../stores/contexts";
 import { resetResourceSchemasStore } from "../stores/resourceSchemas";
 
+Object.defineProperty(window, "matchMedia", {
+  writable: true,
+  value: (query: string) => {
+    const mql: Record<string, unknown> = {
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+      addListener: () => {},
+      removeListener: () => {},
+    };
+    return mql as unknown as MediaQueryList;
+  },
+});
+
+HTMLCanvasElement.prototype.getContext = () => null;
+
 afterEach(() => {
   cleanup();
   // A modal that a failing test left open must not swallow the next test's back gesture.

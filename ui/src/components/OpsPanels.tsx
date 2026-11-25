@@ -5,9 +5,10 @@ import { useContextsStore } from "../stores/contexts";
 import { usePortForwardsStore } from "../stores/portForwards";
 import {
   getExecClient,
-  stripAnsi,
   type ExecClient,
 } from "./execTerminal";
+import { TerminalEmulator } from "./TerminalEmulator";
+import { TerminalStream } from "./terminalStream";
 
 export type { ExecClient };
 
@@ -64,9 +65,9 @@ export function ExecShellPanel({
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [execError, setExecError] = useState<string | null>(null);
-  const [terminalOutput, setTerminalOutput] = useState<string>("");
+  // Bounded output pipe for the current terminal; kept across reconnects so history stays visible.
+  const [stream, setStream] = useState<TerminalStream | null>(null);
   const [confirmPodName, setConfirmPodName] = useState("");
-  const terminalRef = useRef<HTMLDivElement | null>(null);
   const sessionIdRef = useRef<number | null>(null);
 
   const effectiveContainer =
@@ -94,18 +95,6 @@ export function ExecShellPanel({
       }
     };
   }, [client]);
-
-  useEffect(() => {
-    if (sessionId !== null) {
-      terminalRef.current?.focus();
-    }
-  }, [sessionId]);
-
-  useEffect(() => {
-    if (terminalRef.current) {
-      terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
-    }
-  }, [terminalOutput]);
 
   const handleExternalTerminal = async () => {
     if (readOnly || effectiveContainer.length === 0 || !isConfirmed) return;
@@ -141,14 +130,17 @@ export function ExecShellPanel({
     setConnecting(true);
     setExecError(null);
 
+    const previousStream = stream;
+    const out = previousStream ?? new TerminalStream();
+    setStream(out);
+
     try {
+      const onChunk = (chunk: string) => {
+        out.write(chunk);
+      };
       const channel = client.createChannel
-        ? client.createChannel((chunk: string) => {
-            setTerminalOutput((prev) => prev + chunk);
-          })
-        : new Channel<string>((chunk: string) => {
-            setTerminalOutput((prev) => prev + chunk);
-          });
+        ? client.createChannel(onChunk)
+        : new Channel<string>(onChunk);
 
       const confirmedName = protectedContext ? confirmPodName : null;
       const res = isAttach
@@ -176,10 +168,12 @@ export function ExecShellPanel({
         sessionIdRef.current = res.data;
         onSessionChange?.(res.data);
       } else {
+        setStream(previousStream);
         setExecError(res.error.message || `${actionNoun} failed: ${res.error.kind}`);
       }
     } catch (err: unknown) {
       setConnecting(false);
+      setStream(previousStream);
       if (onStartExec && !execClient && !isTauri()) {
         return;
       }
@@ -203,54 +197,52 @@ export function ExecShellPanel({
     } catch {
       // Ignore stop errors on manual disconnect
     }
-    setTerminalOutput(
-      (prev) =>
-        prev + (prev.endsWith("\n") || prev.length === 0 ? "" : "\n") + "[Session disconnected]\n",
-    );
+    stream?.write("\r\n[Session disconnected]\r\n");
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
-    if (sessionId === null) return;
+  const confirmGuard =
+    sessionId === null && protectedContext && !readOnly ? (
+      <div
+        className="exec-panel__guard"
+        data-testid={isAttach ? "attach-protected-guard" : "exec-protected-guard"}
+      >
+        <label className="exec-panel__guard-label" htmlFor="exec-confirm-input">
+          {`Protected context '${cluster}'. Type '${pod}' to confirm ${isAttach ? "process attach" : "shell access"}:`}
+        </label>
+        <input
+          id="exec-confirm-input"
+          type="text"
+          data-testid="exec-confirm-input"
+          className="exec-panel__confirm-input"
+          placeholder={pod}
+          autoComplete="off"
+          spellCheck={false}
+          value={confirmPodName}
+          onChange={(e) => {
+            setConfirmPodName(e.target.value);
+          }}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === "Enter" && confirmPodName === pod && !connecting) {
+              e.preventDefault();
+              void handleConnect();
+            }
+          }}
+        />
+      </div>
+    ) : null;
 
-    if (e.metaKey || e.altKey) return;
-
-    let dataToSend: string | null = null;
-    if (e.key === "Enter") {
-      dataToSend = "\n";
-    } else if (e.key === "Backspace") {
-      dataToSend = "\x7f";
-    } else if (e.key === "Tab") {
-      dataToSend = "\t";
-    } else if (e.key === "Escape") {
-      dataToSend = "\x1b";
-      e.stopPropagation();
-    } else if (e.ctrlKey) {
-      const lower = e.key.toLowerCase();
-      if (lower === "c") {
-        dataToSend = "\x03";
-      } else if (lower === "d") {
-        dataToSend = "\x04";
-      } else if (lower === "l") {
-        dataToSend = "\x0c";
-      }
-    } else if (e.key.length === 1) {
-      dataToSend = e.key;
-    }
-
-    if (dataToSend !== null) {
-      e.preventDefault();
-      void client.writeExecStdin(sessionId, dataToSend).catch(() => undefined);
-    }
-  };
-
-  const handlePaste = (e: React.ClipboardEvent<HTMLElement>) => {
-    if (sessionId === null) return;
-    const text = e.clipboardData.getData("text");
-    if (text) {
-      e.preventDefault();
-      void client.writeExecStdin(sessionId, text).catch(() => undefined);
-    }
-  };
+  const placeholder =
+    confirmGuard ??
+    (stream !== null ? null : readOnly ? (
+      <div className="exec-panel__placeholder">{`${actionNoun} disabled: context is read-only`}</div>
+    ) : (
+      <div className="exec-panel__placeholder">
+        {isAttach
+          ? "Select a container, then click Attach to Process."
+          : "Select a container and shell, then click Connect Shell."}
+      </div>
+    ));
 
   return (
     <section aria-label={`${actionNoun} for ${pod}`} className="exec-panel">
@@ -388,90 +380,23 @@ export function ExecShellPanel({
         </div>
       )}
 
-      <div
-        data-testid={isAttach ? "attach-terminal" : "exec-terminal"}
-        className="exec-panel__terminal"
-        tabIndex={0}
-        role="region"
-        aria-label={`${actionNoun} terminal for ${pod}`}
-        ref={terminalRef}
-        onKeyDown={handleKeyDown}
-        onPaste={handlePaste}
-      >
-        {sessionId === null && terminalOutput.length === 0 ? (
-          readOnly ? (
-            <div className="exec-panel__placeholder">
-              {`${actionNoun} disabled: context is read-only`}
-            </div>
-          ) : protectedContext ? (
-            <div className="exec-panel__guard" data-testid={isAttach ? "attach-protected-guard" : "exec-protected-guard"}>
-              <label className="exec-panel__guard-label" htmlFor="exec-confirm-input">
-                {`Protected context '${cluster}'. Type '${pod}' to confirm ${isAttach ? "process attach" : "shell access"}:`}
-              </label>
-              <input
-                id="exec-confirm-input"
-                type="text"
-                data-testid="exec-confirm-input"
-                className="exec-panel__confirm-input"
-                placeholder={pod}
-                autoComplete="off"
-                spellCheck={false}
-                value={confirmPodName}
-                onChange={(e) => {
-                  setConfirmPodName(e.target.value);
-                }}
-                onKeyDown={(e) => {
-                  e.stopPropagation();
-                  if (e.key === "Enter" && confirmPodName === pod && !connecting) {
-                    e.preventDefault();
-                    void handleConnect();
-                  }
-                }}
-              />
-            </div>
-          ) : (
-            <div className="exec-panel__placeholder">
-              {isAttach
-                ? "Select a container, then click Attach to Process."
-                : "Select a container and shell, then click Connect Shell."}
-            </div>
-          )
-        ) : (
-          <>
-            {sessionId === null && protectedContext && !readOnly && (
-              <div className="exec-panel__guard" data-testid={isAttach ? "attach-protected-guard" : "exec-protected-guard"}>
-                <label className="exec-panel__guard-label" htmlFor="exec-confirm-input">
-                  {`Protected context '${cluster}'. Type '${pod}' to confirm ${isAttach ? "process attach" : "shell access"}:`}
-                </label>
-                <input
-                  id="exec-confirm-input"
-                  type="text"
-                  data-testid="exec-confirm-input"
-                  className="exec-panel__confirm-input"
-                  placeholder={pod}
-                  autoComplete="off"
-                  spellCheck={false}
-                  value={confirmPodName}
-                  onChange={(e) => {
-                    setConfirmPodName(e.target.value);
-                  }}
-                  onKeyDown={(e) => {
-                    e.stopPropagation();
-                    if (e.key === "Enter" && confirmPodName === pod && !connecting) {
-                      e.preventDefault();
-                      void handleConnect();
-                    }
-                  }}
-                />
-              </div>
-            )}
-            <pre data-testid={isAttach ? "attach-output" : "exec-output"} className="exec-panel__output">
-              {stripAnsi(terminalOutput)}
-              {sessionId !== null && <span className="exec-panel__cursor" aria-hidden="true" />}
-            </pre>
-          </>
-        )}
-      </div>
+      <TerminalEmulator
+        stream={stream}
+        sessionId={sessionId}
+        testId={isAttach ? "attach-terminal" : "exec-terminal"}
+        ariaLabel={`${actionNoun} terminal for ${pod}`}
+        onStdin={(data) => {
+          if (sessionId !== null) {
+            void client.writeExecStdin(sessionId, data).catch(() => undefined);
+          }
+        }}
+        onResize={(cols, rows) => {
+          if (sessionId !== null && client.resizeExecSession) {
+            void client.resizeExecSession(sessionId, cols, rows).catch(() => undefined);
+          }
+        }}
+        placeholder={placeholder}
+      />
     </section>
   );
 }

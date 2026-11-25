@@ -137,6 +137,10 @@ pub enum Error {
         message: String,
     },
 
+    /// Requested terminal dimensions are zero or larger than [`crate::exec::MAX_TERMINAL_DIMENSION`].
+    #[error("invalid terminal size {cols}x{rows}: both sides must be between 1 and {max}", max = crate::exec::MAX_TERMINAL_DIMENSION)]
+    InvalidTerminalSize { cols: u16, rows: u16 },
+
     /// A URL requested to open in a browser is invalid, disallowed, or unsafe.
     #[error("invalid browser URL: {reason}")]
     InvalidBrowserUrl { reason: String },

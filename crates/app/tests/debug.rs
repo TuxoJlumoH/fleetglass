@@ -58,6 +58,8 @@ fn test_debug_node_preview_and_safety() {
         command: vec!["chroot".to_string(), "/host".to_string()],
         confirmed_name: Some("node-worker-1".to_string()),
         namespace: Some("default".to_string()),
+        cols: None,
+        rows: None,
     };
 
     let preview = fleetglass_core::actions::debug::preview_debug_node_kubectl(&request);

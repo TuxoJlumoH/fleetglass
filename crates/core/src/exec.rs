@@ -6,10 +6,40 @@ use k8s_openapi::api::core::v1::Pod;
 use kube::Client;
 use kube::api::{Api, AttachParams};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
 use crate::api::{AttachSpec, ContextSettings, ExecSpec};
 use crate::error::{Error, Result};
+
+/// Largest accepted terminal width or height, in cells.
+pub const MAX_TERMINAL_DIMENSION: u16 = 1000;
+
+/// Validated remote PTY dimensions (`05-02`): both sides in `1..=MAX_TERMINAL_DIMENSION`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerminalSize {
+    cols: u16,
+    rows: u16,
+}
+
+impl TerminalSize {
+    /// Returns [`Error::InvalidTerminalSize`] if either side is zero or above [`MAX_TERMINAL_DIMENSION`].
+    pub fn new(cols: u16, rows: u16) -> Result<Self> {
+        let valid = |v: u16| (1..=MAX_TERMINAL_DIMENSION).contains(&v);
+        if valid(cols) && valid(rows) {
+            Ok(Self { cols, rows })
+        } else {
+            Err(Error::InvalidTerminalSize { cols, rows })
+        }
+    }
+
+    pub fn cols(self) -> u16 {
+        self.cols
+    }
+
+    pub fn rows(self) -> u16 {
+        self.rows
+    }
+}
 
 /// Returns `custom.to_vec()` if non-empty, otherwise defaults to `vec!["/bin/sh"]`.
 pub fn default_shell_command(custom: &[String]) -> Vec<String> {
@@ -83,18 +113,29 @@ pub fn preview_attach_kubectl(spec: &AttachSpec) -> String {
     }
 }
 
-/// An active interactive container execution session (`R-10`).
+/// An active interactive container execution session (`R-10`, `05-02`).
 #[derive(Debug)]
 pub struct ExecSession {
     stdin_tx: mpsc::Sender<Vec<u8>>,
+    /// Latest requested PTY size. A `watch` channel keeps only the newest value, so a burst of
+    /// resizes never blocks the caller or queues up; the pump forwards whatever is current.
+    resize_tx: watch::Sender<Option<TerminalSize>>,
     task: tokio::task::JoinHandle<()>,
 }
 
 impl ExecSession {
     /// Creates an [`ExecSession`] from components (useful for tests or custom wiring).
     #[doc(hidden)]
-    pub fn new(stdin_tx: mpsc::Sender<Vec<u8>>, task: tokio::task::JoinHandle<()>) -> Self {
-        Self { stdin_tx, task }
+    pub fn new(
+        stdin_tx: mpsc::Sender<Vec<u8>>,
+        resize_tx: watch::Sender<Option<TerminalSize>>,
+        task: tokio::task::JoinHandle<()>,
+    ) -> Self {
+        Self {
+            stdin_tx,
+            resize_tx,
+            task,
+        }
     }
 
     /// Returns a clone of the channel sender for stdin bytes.
@@ -117,6 +158,14 @@ impl ExecSession {
         self.send_stdin(text.as_bytes().to_vec()).await
     }
 
+    /// Requests a new remote PTY size (`05-02`). Never blocks: it replaces any size the pump
+    /// has not forwarded yet. Fails only when the session has ended.
+    pub fn resize(&self, size: TerminalSize) -> Result<()> {
+        self.resize_tx.send(Some(size)).map_err(|_| Error::Exec {
+            message: "terminal session has ended".to_owned(),
+        })
+    }
+
     /// Aborts the remote execution session and background pump tasks.
     pub fn abort(&self) {
         self.task.abort();
@@ -132,6 +181,126 @@ impl Drop for ExecSession {
     fn drop(&mut self) {
         self.task.abort();
     }
+}
+
+/// Spawns interactive I/O pump tasks (stdin, stdout, optional stderr, resize) for an `AttachedProcess`
+/// and returns an [`ExecSession`].
+///
+/// If the initial dimensions are valid (see [`TerminalSize::new`]) they are sent first.
+///
+/// An optional `cleanup` guard implementing `Send + 'static` can be held by the task,
+/// ensuring it is dropped (e.g. cleaning up temporary debug pods) when the session finishes or is aborted.
+pub async fn spawn_session_pumps(
+    mut attached: kube::api::AttachedProcess,
+    initial_cols: u16,
+    initial_rows: u16,
+    output_tx: mpsc::Sender<String>,
+    cleanup: Option<Box<dyn Send + 'static>>,
+) -> Result<ExecSession> {
+    let mut stdin = attached.stdin().ok_or_else(|| Error::Exec {
+        message: "terminal stdin stream unavailable".to_owned(),
+    })?;
+    let mut stdout = attached.stdout().ok_or_else(|| Error::Exec {
+        message: "terminal stdout stream unavailable".to_owned(),
+    })?;
+    let stderr = attached.stderr();
+
+    let (stdin_tx, mut stdin_rx) = mpsc::channel::<Vec<u8>>(128);
+    let initial = TerminalSize::new(initial_cols, initial_rows).ok();
+    let (resize_tx, mut resize_rx) = watch::channel(initial);
+    // Mark the initial value as unseen so the pump forwards it first.
+    resize_rx.mark_changed();
+    let attached_resize = attached.terminal_size();
+
+    let output_tx_err = output_tx.clone();
+
+    let task = tokio::spawn(async move {
+        let _guard = cleanup;
+
+        let stdin_pump = async {
+            while let Some(bytes) = stdin_rx.recv().await {
+                if stdin.write_all(&bytes).await.is_err() {
+                    break;
+                }
+                if stdin.flush().await.is_err() {
+                    break;
+                }
+            }
+        };
+
+        let resize_pump = async {
+            let Some(mut sender) = attached_resize else {
+                return;
+            };
+            let mut last_sent: Option<TerminalSize> = None;
+            while resize_rx.changed().await.is_ok() {
+                let latest = *resize_rx.borrow_and_update();
+                let Some(size) = latest.filter(|s| Some(*s) != last_sent) else {
+                    continue;
+                };
+                let packet = kube::api::TerminalSize {
+                    width: size.cols,
+                    height: size.rows,
+                };
+                if sender.send(packet).await.is_err() {
+                    break;
+                }
+                last_sent = Some(size);
+            }
+        };
+
+        let stdout_pump = async {
+            let mut buf = [0u8; 4096];
+            loop {
+                match stdout.read(&mut buf).await {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        let text = String::from_utf8_lossy(&buf[..n]).into_owned();
+                        if output_tx.send(text).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        };
+
+        let stderr_pump = async {
+            if let Some(mut stderr) = stderr {
+                let mut buf = [0u8; 4096];
+                loop {
+                    match stderr.read(&mut buf).await {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            let text = String::from_utf8_lossy(&buf[..n]).into_owned();
+                            if output_tx_err.send(text).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+            }
+        };
+
+        let outputs = async { tokio::join!(stdout_pump, stderr_pump) };
+
+        tokio::select! {
+            _ = outputs => {},
+            _ = async {
+                stdin_pump.await;
+                futures::future::pending::<()>().await;
+            } => {},
+            _ = async {
+                resize_pump.await;
+                futures::future::pending::<()>().await;
+            } => {},
+        }
+
+        attached.abort();
+    });
+
+    Ok(ExecSession::new(stdin_tx, resize_tx, task))
 }
 
 /// Starts an interactive exec session in `spec.pod` and streams output chunks to `output_tx`.
@@ -162,94 +331,11 @@ pub async fn start_exec_session(
     }
 
     let pods: Api<Pod> = Api::namespaced(client.clone(), &spec.namespace);
-    let mut attached = pods.exec(&spec.pod, command, &ap).await?;
-
-    let mut stdin = attached.stdin().ok_or_else(|| Error::Exec {
-        message: "exec stdin stream unavailable".to_owned(),
-    })?;
-    let mut stdout = attached.stdout().ok_or_else(|| Error::Exec {
-        message: "exec stdout stream unavailable".to_owned(),
-    })?;
-    let stderr = attached.stderr();
-
-    if spec.cols > 0
-        && spec.rows > 0
-        && let Some(mut resize) = attached.terminal_size()
-    {
-        let _ = resize
-            .send(kube::api::TerminalSize {
-                width: spec.cols,
-                height: spec.rows,
-            })
-            .await;
-    }
-
-    let (stdin_tx, mut stdin_rx) = mpsc::channel::<Vec<u8>>(128);
-    let output_tx_err = output_tx.clone();
-
-    let task = tokio::spawn(async move {
-        let stdin_pump = async {
-            while let Some(bytes) = stdin_rx.recv().await {
-                if stdin.write_all(&bytes).await.is_err() {
-                    break;
-                }
-                if stdin.flush().await.is_err() {
-                    break;
-                }
-            }
-        };
-
-        let stdout_pump = async {
-            let mut buf = [0u8; 4096];
-            loop {
-                match stdout.read(&mut buf).await {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        let text = String::from_utf8_lossy(&buf[..n]).into_owned();
-                        if output_tx.send(text).await.is_err() {
-                            break;
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
-        };
-
-        let stderr_pump = async {
-            if let Some(mut stderr) = stderr {
-                let mut buf = [0u8; 4096];
-                loop {
-                    match stderr.read(&mut buf).await {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            let text = String::from_utf8_lossy(&buf[..n]).into_owned();
-                            if output_tx_err.send(text).await.is_err() {
-                                break;
-                            }
-                        }
-                        Err(_) => break,
-                    }
-                }
-            }
-        };
-
-        let outputs = async { tokio::join!(stdout_pump, stderr_pump) };
-
-        tokio::select! {
-            _ = outputs => {},
-            _ = async {
-                stdin_pump.await;
-                futures::future::pending::<()>().await;
-            } => {},
-        }
-
-        attached.abort();
-    });
-
-    Ok(ExecSession { stdin_tx, task })
+    let attached = pods.exec(&spec.pod, command, &ap).await?;
+    spawn_session_pumps(attached, spec.cols, spec.rows, output_tx, None).await
 }
 
-/// Starts an interactive container attach session in `spec.pod` and streams output chunks to `output_tx` (`04-03c`).
+/// Starts an interactive container attach session in `spec.pod` and streams output chunks to `output_tx` (`04-03c`, `05-02`).
 pub async fn start_attach_session(
     client: &Client,
     spec: &AttachSpec,
@@ -271,91 +357,8 @@ pub async fn start_attach_session(
     }
 
     let pods: Api<Pod> = Api::namespaced(client.clone(), &spec.namespace);
-    let mut attached = pods.attach(&spec.pod, &ap).await?;
-
-    let mut stdin = attached.stdin().ok_or_else(|| Error::Exec {
-        message: "attach stdin stream unavailable".to_owned(),
-    })?;
-    let mut stdout = attached.stdout().ok_or_else(|| Error::Exec {
-        message: "attach stdout stream unavailable".to_owned(),
-    })?;
-    let stderr = attached.stderr();
-
-    if spec.cols > 0
-        && spec.rows > 0
-        && let Some(mut resize) = attached.terminal_size()
-    {
-        let _ = resize
-            .send(kube::api::TerminalSize {
-                width: spec.cols,
-                height: spec.rows,
-            })
-            .await;
-    }
-
-    let (stdin_tx, mut stdin_rx) = mpsc::channel::<Vec<u8>>(128);
-    let output_tx_err = output_tx.clone();
-
-    let task = tokio::spawn(async move {
-        let stdin_pump = async {
-            while let Some(bytes) = stdin_rx.recv().await {
-                if stdin.write_all(&bytes).await.is_err() {
-                    break;
-                }
-                if stdin.flush().await.is_err() {
-                    break;
-                }
-            }
-        };
-
-        let stdout_pump = async {
-            let mut buf = [0u8; 4096];
-            loop {
-                match stdout.read(&mut buf).await {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        let text = String::from_utf8_lossy(&buf[..n]).into_owned();
-                        if output_tx.send(text).await.is_err() {
-                            break;
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
-        };
-
-        let stderr_pump = async {
-            if let Some(mut stderr) = stderr {
-                let mut buf = [0u8; 4096];
-                loop {
-                    match stderr.read(&mut buf).await {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            let text = String::from_utf8_lossy(&buf[..n]).into_owned();
-                            if output_tx_err.send(text).await.is_err() {
-                                break;
-                            }
-                        }
-                        Err(_) => break,
-                    }
-                }
-            }
-        };
-
-        let outputs = async { tokio::join!(stdout_pump, stderr_pump) };
-
-        tokio::select! {
-            _ = outputs => {},
-            _ = async {
-                stdin_pump.await;
-                futures::future::pending::<()>().await;
-            } => {},
-        }
-
-        attached.abort();
-    });
-
-    Ok(ExecSession { stdin_tx, task })
+    let attached = pods.attach(&spec.pod, &ap).await?;
+    spawn_session_pumps(attached, spec.cols, spec.rows, output_tx, None).await
 }
 
 #[cfg(test)]
@@ -500,5 +503,58 @@ mod tests {
             preview_attach_kubectl(&no_container_spec),
             "kubectl --context prod-eu -n payments attach pod/api-7f8b9-x12 -it"
         );
+    }
+
+    #[test]
+    fn terminal_size_rejects_zero_and_absurd_dimensions() {
+        assert!(TerminalSize::new(80, 24).is_ok());
+        assert!(TerminalSize::new(1, 1).is_ok());
+        assert!(TerminalSize::new(MAX_TERMINAL_DIMENSION, MAX_TERMINAL_DIMENSION).is_ok());
+        for (cols, rows) in [
+            (0, 24),
+            (80, 0),
+            (0, 0),
+            (1001, 24),
+            (80, 1001),
+            (u16::MAX, 1),
+        ] {
+            assert!(
+                matches!(
+                    TerminalSize::new(cols, rows),
+                    Err(Error::InvalidTerminalSize { .. })
+                ),
+                "{cols}x{rows} must be rejected"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn exec_session_resize_keeps_only_latest_size_and_never_blocks() {
+        let (stdin_tx, mut stdin_rx) = mpsc::channel(16);
+        let (resize_tx, mut resize_rx) = watch::channel(None);
+        let task = tokio::spawn(async {});
+        let session = ExecSession::new(stdin_tx, resize_tx, task);
+
+        session.send_stdin(b"test-input".to_vec()).await.unwrap();
+        assert_eq!(stdin_rx.recv().await.unwrap(), b"test-input");
+
+        // Far more resizes than any bounded queue would hold: none block, only the last survives.
+        for i in 1..=10_000u16 {
+            session
+                .resize(TerminalSize::new(i % 900 + 1, 43).unwrap())
+                .unwrap();
+        }
+        session.resize(TerminalSize::new(132, 43).unwrap()).unwrap();
+        assert!(resize_rx.has_changed().unwrap());
+        assert_eq!(
+            *resize_rx.borrow_and_update(),
+            Some(TerminalSize::new(132, 43).unwrap())
+        );
+
+        drop(resize_rx);
+        assert!(matches!(
+            session.resize(TerminalSize::new(80, 24).unwrap()),
+            Err(Error::Exec { .. })
+        ));
     }
 }

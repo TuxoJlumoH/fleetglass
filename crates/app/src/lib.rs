@@ -233,6 +233,20 @@ impl AppState {
         Ok(())
     }
 
+    /// Resizes an active exec/attach/node-debug session's remote PTY (`05-02`).
+    /// Rejects zero or oversized dimensions; never blocks (only the latest size is kept).
+    pub fn resize_exec_session(&self, id: u32, cols: u16, rows: u16) -> Result<(), IpcError> {
+        let size = fleetglass_core::exec::TerminalSize::new(cols, rows).map_err(IpcError::from)?;
+        let map = self
+            .exec_sessions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let entry = map
+            .get(&id)
+            .ok_or_else(|| IpcError::invalid_input(format!("exec session {id} not found")))?;
+        entry.session.resize(size).map_err(IpcError::from)
+    }
+
     /// Registers the tasks of a workload log stream and returns its new ID.
     /// Entries whose forwarder already ended (window closed) are pruned here.
     #[allow(dead_code)]
@@ -1834,6 +1848,18 @@ async fn write_exec_stdin(
     state.write_exec_stdin(id, data).await
 }
 
+/// Resizes an active container exec/attach/node-debug session's remote PTY dimensions (`05-02`).
+#[tauri::command]
+#[specta::specta]
+async fn resize_exec_session(
+    state: tauri::State<'_, AppState>,
+    id: u32,
+    cols: u16,
+    rows: u16,
+) -> Result<(), IpcError> {
+    state.resize_exec_session(id, cols, rows)
+}
+
 /// Stops an active container exec session by ID (`R-10`).
 #[tauri::command]
 #[specta::specta]
@@ -3180,6 +3206,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
         start_node_debug_session,
         delete_node_debug_pod,
         write_exec_stdin,
+        resize_exec_session,
         stop_exec_session,
         get_cluster_groups,
         set_cluster_group,
@@ -4307,10 +4334,11 @@ contexts:
             )));
 
             let (tx, mut rx) = tauri::async_runtime::channel::<Vec<u8>>(10);
+            let (resize_tx, mut resize_rx) = tokio::sync::watch::channel(None);
             let dummy_task = tauri::async_runtime::handle()
                 .inner()
                 .spawn(async move { while rx.recv().await.is_some() {} });
-            let session = ExecSession::new(tx, dummy_task);
+            let session = ExecSession::new(tx, resize_tx, dummy_task);
             let forwarder = tauri::async_runtime::spawn(std::future::pending::<()>());
 
             let id = state.insert_exec_session(session, forwarder);
@@ -4323,6 +4351,28 @@ contexts:
                     .await
                     .is_ok()
             );
+
+            // Dynamic PTY resize succeeds; bursts coalesce to the latest size (05-02)
+            for cols in 100..=119 {
+                state.resize_exec_session(id, cols, 40).unwrap();
+            }
+            state.resize_exec_session(id, 120, 40).unwrap();
+            assert!(resize_rx.has_changed().unwrap());
+            assert_eq!(
+                *resize_rx.borrow_and_update(),
+                Some(fleetglass_core::exec::TerminalSize::new(120, 40).unwrap())
+            );
+
+            // Zero and absurd dimensions are rejected at the IPC boundary
+            for (cols, rows) in [(0, 40), (120, 0), (1001, 40), (120, 5000)] {
+                let err = state.resize_exec_session(id, cols, rows).unwrap_err();
+                assert_eq!(err.kind, ErrorKind::InvalidInput, "{cols}x{rows}");
+            }
+            assert!(!resize_rx.has_changed().unwrap());
+
+            // Nonexistent session returns InvalidInput
+            let err = state.resize_exec_session(9999, 80, 24).unwrap_err();
+            assert_eq!(err.kind, ErrorKind::InvalidInput);
 
             // Nonexistent session returns InvalidInput
             let err = state
