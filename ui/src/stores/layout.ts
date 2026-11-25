@@ -8,7 +8,9 @@ export type TabView =
   | "helm"
   | "audit"
   | "plugins"
-  | "import";
+  | "import"
+  | "logs"
+  | "yaml";
 
 /** The Android "Import contexts" view (03-02c); one tab, reopened by this id. */
 export const IMPORT_TAB: Tab = { id: "view-import", title: "Import contexts", view: "import" };
@@ -28,6 +30,9 @@ export interface Tab {
 
 export type SplitMode = "none" | "horizontal" | "vertical";
 
+/** One of the two panes of the split view; "primary" is the only pane while the split is closed. */
+export type PaneId = "primary" | "secondary";
+
 interface LayoutState {
   sidebarCollapsed: boolean;
   tabs: Tab[];
@@ -38,6 +43,16 @@ interface LayoutState {
   splitMode: SplitMode;
   /** View shown in the secondary split pane; independent of the active tab. */
   secondaryView: TabView;
+  /** Query state of the secondary pane's resource table (the primary keeps it per tab). */
+  secondaryCluster: string | null;
+  /** Comma-separated namespace filter, like `Tab.namespace`. */
+  secondaryNamespace: string | null;
+  secondaryKind: string;
+  secondaryTextFilter: string;
+  /** Bumped when a tab is dropped onto the secondary pane; remounts its view with the new state. */
+  secondaryResetToken: number;
+  /** Pane that receives keyboard shortcuts and drives the palette's selection. */
+  activePane: PaneId;
   toggleSidebar: () => void;
   setActiveTab: (id: string) => void;
   /** Activate the tab `delta` positions away from the active one, wrapping around. */
@@ -50,6 +65,7 @@ interface LayoutState {
   showKind: (title: string, kind: string) => string;
   closeTab: (id: string) => void;
   updateTabState: (id: string, patch: Partial<Tab>) => void;
+  reorderTabs: (sourceId: string, targetId: string) => void;
   goBack: () => void;
   goForward: () => void;
   setSplitMode: (mode: SplitMode) => void;
@@ -57,6 +73,14 @@ interface LayoutState {
   /** Swaps horizontal and vertical; does nothing while the split is closed. */
   toggleSplitOrientation: () => void;
   setSecondaryView: (view: TabView) => void;
+  setSecondaryCluster: (cluster: string | null) => void;
+  setSecondaryNamespace: (namespace: string | null) => void;
+  setSecondaryKind: (kind: string) => void;
+  setSecondaryTextFilter: (filter: string) => void;
+  /** Shows `tab`'s view and query state in the secondary pane (a tab dropped onto it). */
+  loadTabIntoSecondary: (tab: Tab) => void;
+  setActivePane: (pane: PaneId) => void;
+  switchPane: () => void;
 }
 
 /** The initial tab (02-08b); reopened with this id by the sidebar / palette "Overview". */
@@ -87,17 +111,23 @@ export const initialLayoutState = {
   historyForward: [] as string[],
   splitMode: "none" as SplitMode,
   secondaryView: "apps" as TabView,
+  secondaryCluster: null as string | null,
+  secondaryNamespace: null as string | null,
+  secondaryKind: "Pod",
+  secondaryTextFilter: "",
+  secondaryResetToken: 0,
+  activePane: "primary" as PaneId,
 };
 
 export const useLayoutStore = create<LayoutState>()((set, get) => ({
   ...initialLayoutState,
   setSplitMode: (mode) => {
-    set({ splitMode: mode });
+    set(mode === "none" ? { splitMode: mode, activePane: "primary" } : { splitMode: mode });
   },
   toggleSplit: (mode = "horizontal") => {
-    set((s) => ({
-      splitMode: s.splitMode === "none" ? mode : "none",
-    }));
+    set((s) =>
+      s.splitMode === "none" ? { splitMode: mode } : { splitMode: "none", activePane: "primary" },
+    );
   },
   toggleSplitOrientation: () => {
     set((s) => {
@@ -107,6 +137,46 @@ export const useLayoutStore = create<LayoutState>()((set, get) => ({
   },
   setSecondaryView: (view) => {
     set({ secondaryView: view });
+  },
+  setSecondaryCluster: (cluster) => {
+    set({ secondaryCluster: cluster });
+  },
+  setSecondaryNamespace: (namespace) => {
+    set({ secondaryNamespace: namespace });
+  },
+  setSecondaryKind: (kind) => {
+    set({ secondaryKind: kind });
+  },
+  setSecondaryTextFilter: (filter) => {
+    set({ secondaryTextFilter: filter });
+  },
+  loadTabIntoSecondary: (tab) => {
+    set((s) => ({
+      secondaryView: tab.view ?? "resources",
+      secondaryKind: tab.kind ?? s.secondaryKind,
+      secondaryCluster: tab.cluster ?? null,
+      secondaryTextFilter: tab.textFilter ?? "",
+      secondaryNamespace: tab.namespace ?? null,
+      secondaryResetToken: s.secondaryResetToken + 1,
+    }));
+  },
+  setActivePane: (pane) => {
+    set({ activePane: pane });
+  },
+  switchPane: () => {
+    set((s) => ({ activePane: s.activePane === "primary" ? "secondary" : "primary" }));
+  },
+  reorderTabs: (sourceId, targetId) => {
+    const { tabs } = get();
+    const sourceIndex = tabs.findIndex((t) => t.id === sourceId);
+    const targetIndex = tabs.findIndex((t) => t.id === targetId);
+    if (sourceIndex === -1 || targetIndex === -1 || sourceIndex === targetIndex) return;
+    const nextTabs = [...tabs];
+    const [moved] = nextTabs.splice(sourceIndex, 1);
+    if (moved) {
+      nextTabs.splice(targetIndex, 0, moved);
+      set({ tabs: nextTabs });
+    }
   },
   toggleSidebar: () => {
     set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed }));

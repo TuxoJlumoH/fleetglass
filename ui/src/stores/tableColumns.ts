@@ -1,9 +1,11 @@
 import { create } from "zustand";
+import type { PaneId } from "./layout";
 
 /**
  * Columns the user hid with the toolbar's column picker, persisted. Keyed by lower-case kind
  * (tabs carry no API group), then by column LABEL, not position, so a changed cell layout can
- * never hide a different column.
+ * never hide a different column. The primary pane uses the plain kind key (the format from
+ * before split view); the secondary split pane keeps its own under `secondary:<kind>`.
  */
 export const HIDDEN_COLUMNS_STORAGE_KEY = "fleetglass.hiddenColumns";
 
@@ -20,6 +22,11 @@ function storage(): Storage | null {
   } catch {
     return null;
   }
+}
+
+function storageKey(kind: string, pane: PaneId): string {
+  const k = kind.toLowerCase();
+  return pane === "secondary" ? `secondary:${k}` : k;
 }
 
 /** Keeps the newest {@link MAX_STORED_KINDS} non-empty kinds (object insertion order). */
@@ -67,9 +74,9 @@ const NONE: readonly string[] = [];
 
 interface TableColumnsState {
   hidden: HiddenByKind;
-  /** Hides or shows the column labelled `label` of `kind`. */
-  toggleColumn: (kind: string, label: string) => void;
-  showAll: (kind: string) => void;
+  /** Hides or shows the column labelled `label` of `kind` in `pane` (default "primary"). */
+  toggleColumn: (kind: string, label: string, pane?: PaneId) => void;
+  showAll: (kind: string, pane?: PaneId) => void;
 }
 
 function without(hidden: HiddenByKind, kind: string): HiddenByKind {
@@ -78,28 +85,32 @@ function without(hidden: HiddenByKind, kind: string): HiddenByKind {
 
 export const useTableColumnsStore = create<TableColumnsState>((set, get) => ({
   hidden: load(),
-  toggleColumn: (kind, label) => {
-    const k = kind.toLowerCase();
-    const current = get().hidden[k] ?? [];
+  toggleColumn: (kind, label, pane = "primary") => {
+    const key = storageKey(kind, pane);
+    const current = get().hidden[key] ?? [];
     const next = current.includes(label)
       ? current.filter((c) => c !== label)
       : [...current, label].slice(0, MAX_HIDDEN_PER_KIND);
     // Re-inserting moves the kind to the end, so the cap drops the least recently changed.
-    const rest = without(get().hidden, k);
-    const hidden = capped(next.length > 0 ? { ...rest, [k]: next } : rest);
+    const hidden = capped({ ...without(get().hidden, key), [key]: next });
     set({ hidden });
     save(hidden);
   },
-  showAll: (kind) => {
-    const hidden = without(get().hidden, kind.toLowerCase());
+  showAll: (kind, pane = "primary") => {
+    const key = storageKey(kind, pane);
+    const hidden = without(get().hidden, key);
     set({ hidden });
     save(hidden);
   },
 }));
 
-/** Hidden column labels of `kind` (stable empty array when none). */
-export function hiddenColumnsOf(state: TableColumnsState, kind: string): readonly string[] {
-  return state.hidden[kind.toLowerCase()] ?? NONE;
+/** Hidden column labels of `kind` in `pane` (stable empty array when none). */
+export function hiddenColumnsOf(
+  state: Pick<TableColumnsState, "hidden">,
+  kind: string,
+  pane: PaneId = "primary",
+): readonly string[] {
+  return state.hidden[storageKey(kind, pane)] ?? NONE;
 }
 
 /** Test helper: re-reads storage into the store. */

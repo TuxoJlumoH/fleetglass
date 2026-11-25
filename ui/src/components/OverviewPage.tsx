@@ -9,7 +9,7 @@ import {
   type RowStatus,
 } from "../generated/bindings";
 import { type ConnectionStatus, useContextsStore } from "../stores/contexts";
-import { useLayoutStore } from "../stores/layout";
+import { type PaneId, useLayoutStore } from "../stores/layout";
 import {
   type AttentionItem,
   type CapacitySummary,
@@ -706,7 +706,7 @@ export function OverviewPlaceholder({
 }
 
 /** Cross-cluster overview (02-08b, mockup `2-overview-dark`). */
-export function OverviewPage() {
+export function OverviewPage({ paneId = "primary" }: { paneId?: PaneId } = {}) {
   const status = useOverviewStore((s) => s.status);
   const data = useOverviewStore((s) => s.data);
   const error = useOverviewStore((s) => s.error);
@@ -716,8 +716,8 @@ export function OverviewPage() {
   const [rsThreshold, setRsThreshold] = useState<number>(20);
   const [customRsReport, setCustomRsReport] = useState<RightSizingReport | null>(null);
   const [now, touchNow] = useOverviewNow();
-  useOverviewSubscription();
-  const drawer = useOverviewDrawer(touchNow);
+  useOverviewSubscription(paneId);
+  const drawer = useOverviewDrawer(touchNow, paneId);
   const openDrawer = drawer.open;
   const closeDrawer = drawer.close;
 
@@ -830,9 +830,10 @@ export function OverviewPage() {
           loading={drawer.loading}
           error={drawer.error}
           onClose={closeDrawer}
+          pane={paneId}
         />
       )}
-      <ActionConfirmDialog />
+      <ActionConfirmDialog pane={paneId} />
     </div>
   );
 }

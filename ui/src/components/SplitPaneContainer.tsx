@@ -1,5 +1,5 @@
 import React, { Children, useEffect, useRef, useState } from "react";
-import { useLayoutStore, type SplitMode } from "../stores/layout";
+import { type PaneId, useLayoutStore, type SplitMode } from "../stores/layout";
 
 export interface SplitPaneContainerProps {
   primary?: React.ReactNode;
@@ -30,6 +30,8 @@ export function SplitPaneContainer({
   const toggleStoreSplit = useLayoutStore((s) => s.toggleSplit);
   const toggleStoreOrientation = useLayoutStore((s) => s.toggleSplitOrientation);
   const setStoreSplitMode = useLayoutStore((s) => s.setSplitMode);
+  const activePane = useLayoutStore((s) => s.activePane);
+  const setActivePane = useLayoutStore((s) => s.setActivePane);
 
   const activeSplitMode = propSplitMode ?? storeSplitMode;
 
@@ -152,6 +154,19 @@ export function SplitPaneContainer({
   }
 
   const isHorizontal = activeSplitMode === "horizontal";
+  // Focus (keyboard or click) anywhere in a pane makes it the active one.
+  const paneProps = (pane: PaneId) => ({
+    "data-testid": `split-pane-${pane}`,
+    "data-pane-active": activePane === pane,
+    className: `split-pane split-pane--${pane}${activePane === pane ? " split-pane--active" : ""}`,
+    tabIndex: -1,
+    onFocusCapture: () => {
+      setActivePane(pane);
+    },
+    onMouseDownCapture: () => {
+      setActivePane(pane);
+    },
+  });
 
   return (
     <div
@@ -159,6 +174,7 @@ export function SplitPaneContainer({
       className={`split-pane-container split-pane-container--${activeSplitMode} ${className ?? ""}`}
       data-testid="split-pane-container"
       data-split-mode={activeSplitMode}
+      data-active-pane={activePane}
       style={{
         display: "grid",
         gridTemplateColumns: isHorizontal
@@ -171,9 +187,7 @@ export function SplitPaneContainer({
         width: "100%",
       }}
     >
-      <div data-testid="split-pane-primary" className="split-pane split-pane--primary">
-        {primaryContent}
-      </div>
+      <div {...paneProps("primary")}>{primaryContent}</div>
 
       <div
         role="separator"
@@ -189,7 +203,7 @@ export function SplitPaneContainer({
         onKeyDown={handleKeyDownSeparator}
       />
 
-      <div data-testid="split-pane-secondary" className="split-pane split-pane--secondary">
+      <div {...paneProps("secondary")}>
         <div className="split-pane__toolbar">
           <div className="split-pane__controls">
             <button

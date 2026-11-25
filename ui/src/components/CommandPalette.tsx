@@ -2,6 +2,7 @@ import { Command } from "cmdk";
 import { useEffect, useState } from "react";
 import { commands } from "../generated/bindings";
 import { ContextUnlockModal } from "./StatusBar";
+import { focusPane } from "./paneFocus";
 import {
   canRestart,
   canScale,
@@ -145,7 +146,9 @@ export function CommandPalette() {
   const runAction = (pending: PendingAction | null) => {
     closePalette();
     // `request` refuses while another action is pending or running.
-    if (pending) useActionsStore.getState().request(pending);
+    // The dialog opens in the pane the selection came from (the active one).
+    const pane = useActionsStore.getState().selectionPane ?? useLayoutStore.getState().activePane;
+    if (pending) useActionsStore.getState().request(pending, pane);
   };
 
   useEffect(() => {
@@ -435,6 +438,22 @@ export function CommandPalette() {
                 }}
               >
                 Switch split orientation
+              </Command.Item>
+              <Command.Item
+                value="Switch split pane focus"
+                keywords={["split", "pane", "focus", "switch", "ctrl+w"]}
+                className="cmdk-item"
+                onSelect={() => {
+                  const { splitMode, switchPane } = useLayoutStore.getState();
+                  if (splitMode === "none") {
+                    useLayoutStore.getState().setSplitMode("horizontal");
+                  }
+                  switchPane();
+                  closePalette();
+                  focusPane(useLayoutStore.getState().activePane);
+                }}
+              >
+                Switch split pane focus
               </Command.Item>
             </Command.Group>
             {contexts.length > 0 && (
