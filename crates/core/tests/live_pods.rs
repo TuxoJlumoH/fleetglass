@@ -89,7 +89,7 @@ fn deployment(namespace: &str) -> Deployment {
             namespace: Some(namespace.to_owned()),
             ..Default::default()
         },
-        spec: Some(DeploymentSpec {
+        spec: DeploymentSpec {
             replicas: Some(3),
             selector: LabelSelector {
                 match_labels: Some(labels.clone()),
@@ -111,7 +111,7 @@ fn deployment(namespace: &str) -> Deployment {
                 }),
             },
             ..Default::default()
-        }),
+        },
         ..Default::default()
     }
 }

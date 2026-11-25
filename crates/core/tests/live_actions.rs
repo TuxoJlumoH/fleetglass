@@ -54,7 +54,7 @@ fn test_deployment(namespace: &str, name: &str, replicas: i32) -> Deployment {
             namespace: Some(namespace.to_owned()),
             ..Default::default()
         },
-        spec: Some(DeploymentSpec {
+        spec: DeploymentSpec {
             replicas: Some(replicas),
             selector: LabelSelector {
                 match_labels: Some(labels.clone()),
@@ -76,7 +76,7 @@ fn test_deployment(namespace: &str, name: &str, replicas: i32) -> Deployment {
                 }),
             },
             ..Default::default()
-        }),
+        },
         ..Default::default()
     }
 }
@@ -168,12 +168,7 @@ async fn run(
     execute_action(client.clone(), &request(scale, None), &open)
         .await
         .expect("scale deployment 3 -> 1");
-    let spec_replicas = deployments
-        .get(&deploy_name)
-        .await
-        .unwrap()
-        .spec
-        .and_then(|s| s.replicas);
+    let spec_replicas = deployments.get(&deploy_name).await.unwrap().spec.replicas;
     assert_eq!(spec_replicas, Some(1));
     wait_for("deployment down to 1 live pod", || async {
         let d = deployments.get(&deploy_name).await.ok()?;
@@ -187,7 +182,8 @@ async fn run(
     // 2. Rollout restart sets the pod-template annotation and rolls the pod.
     let template_annotation = |d: Deployment| {
         d.spec
-            .and_then(|s| s.template.metadata)
+            .template
+            .metadata
             .and_then(|m| m.annotations)
             .and_then(|mut a| a.remove(RESTARTED_AT))
     };
@@ -314,7 +310,7 @@ async fn run(
         unchanged.metadata.generation, snapshot.metadata.generation,
         "rejected actions must not change the deployment spec"
     );
-    assert_eq!(unchanged.spec.and_then(|s| s.replicas), Some(1));
+    assert_eq!(unchanged.spec.replicas, Some(1));
     assert_eq!(live_pods(&pods, &deploy_name).await, pods_snapshot);
 
     let page = audit.query(0, 100, Some(CONTEXT), None).unwrap();
