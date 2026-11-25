@@ -6,6 +6,7 @@ import {
   type MutatingAction_Deserialize,
 } from "../generated/bindings";
 import { useContextsStore } from "./contexts";
+import { type PaneId, useLayoutStore } from "./layout";
 import type { Row } from "./pods";
 
 export type MutatingAction = MutatingAction_Deserialize;
@@ -29,6 +30,8 @@ export const MAX_REPLICAS = 2147483647;
 
 export interface ActionsState {
   pending: PendingAction | null;
+  /** Pane whose view shows the confirm dialog for `pending`; exactly one pane renders it. */
+  pendingPane: PaneId | null;
   /** Increases with every `request`; the dialog is keyed by it. */
   requestId: number;
   /** `kubectl` equivalent from `preview_kubectl_action`; `null` while loading or on error. */
@@ -46,11 +49,19 @@ export interface ActionsState {
   lastSuccess: string | null;
   /** Resource selected in the active table; the command palette offers actions for it. */
   selection: Row | null;
+  /** Pane whose table `selection` came from; `null` when nothing is selected. */
+  selectionPane: PaneId | null;
   /**
-   * Opens the confirm dialog for `pending` and loads its preview and context settings.
-   * Refused (returns `false`) while another action is pending or running; cancel it first.
+   * Each mounted table's own selection. Only the active pane's entry becomes `selection`; a
+   * pane without a table (logs, YAML) leaves the last selection in place.
    */
-  request: (pending: PendingAction) => boolean;
+  paneSelections: Partial<Record<PaneId, Row | null>>;
+  /**
+   * Opens the confirm dialog for `pending` in `pane` (default "primary") and loads its preview
+   * and context settings. Refused (returns `false`) while another action is pending or
+   * running; cancel it first.
+   */
+  request: (pending: PendingAction, pane?: PaneId) => boolean;
   /** Changes the replica count of a pending scale action and refreshes the preview. */
   setReplicas: (replicas: number) => void;
   /** Marks the replica count of a pending scale action as missing (field empty or invalid). */
@@ -60,11 +71,15 @@ export interface ActionsState {
   /** Closes the dialog. Ignored while the action is running (it cannot be called back). */
   cancel: () => void;
   clearSuccess: () => void;
-  setSelection: (row: Row | null) => void;
+  /** Records the selected row of `pane`'s table (default "primary"). */
+  setSelection: (row: Row | null, pane?: PaneId) => void;
+  /** `pane`'s table unmounted: forgets its selection. */
+  clearSelection: (pane: PaneId) => void;
 }
 
 export const initialActionsState = {
   pending: null as PendingAction | null,
+  pendingPane: null as PaneId | null,
   requestId: 0,
   preview: null as string | null,
   previewError: null as string | null,
@@ -75,7 +90,30 @@ export const initialActionsState = {
   errorKind: null as ErrorKind | null,
   lastSuccess: null as string | null,
   selection: null as Row | null,
+  selectionPane: null as PaneId | null,
+  paneSelections: {} as Partial<Record<PaneId, Row | null>>,
 };
+
+type SelectionState = Pick<ActionsState, "selection" | "selectionPane" | "paneSelections">;
+
+/** The global selection follows the active pane's table; other panes keep the last one. */
+function syncedSelection(
+  paneSelections: SelectionState["paneSelections"],
+  current: SelectionState,
+): SelectionState {
+  const active = useLayoutStore.getState().activePane;
+  if (!(active in paneSelections)) {
+    // The selection's own table is gone: never offer actions for a row nobody shows.
+    const stale = current.selectionPane !== null && !(current.selectionPane in paneSelections);
+    return {
+      paneSelections,
+      selection: stale ? null : current.selection,
+      selectionPane: stale ? null : current.selectionPane,
+    };
+  }
+  const selection = paneSelections[active] ?? null;
+  return { paneSelections, selection, selectionPane: selection === null ? null : active };
+}
 
 // Bumped whenever the pending action changes (request, cancel, success, reset). Responses
 // from an older generation are dropped so a slow preview, settings or execute result for a
@@ -340,13 +378,14 @@ export const useActionsStore = create<ActionsState>()((set, get) => {
 
   return {
     ...initialActionsState,
-    request: (pending) => {
+    request: (pending, pane = "primary") => {
       // One action at a time: replacing a running one would drop its result and re-enable
       // Confirm (a second execute); replacing a pending one would discard what the user sees.
       if (get().pending !== null || get().running) return false;
       generation += 1;
       set((state) => ({
         pending,
+        pendingPane: pane,
         requestId: state.requestId + 1,
         preview: null,
         previewError: null,
@@ -411,6 +450,8 @@ export const useActionsStore = create<ActionsState>()((set, get) => {
           ...initialActionsState,
           requestId: state.requestId,
           selection: state.selection,
+          selectionPane: state.selectionPane,
+          paneSelections: state.paneSelections,
           lastSuccess: successMessage(pending),
         }));
         return true;
@@ -425,6 +466,7 @@ export const useActionsStore = create<ActionsState>()((set, get) => {
       generation += 1;
       set({
         pending: null,
+        pendingPane: null,
         preview: null,
         previewError: null,
         settings: null,
@@ -436,8 +478,22 @@ export const useActionsStore = create<ActionsState>()((set, get) => {
     clearSuccess: () => {
       set({ lastSuccess: null });
     },
-    setSelection: (row) => {
-      set({ selection: row });
+    setSelection: (row, pane = "primary") => {
+      set((state) => syncedSelection({ ...state.paneSelections, [pane]: row }, state));
+    },
+    clearSelection: (pane) => {
+      set((state) => {
+        const rest = Object.fromEntries(
+          Object.entries(state.paneSelections).filter(([p]) => p !== pane),
+        ) as ActionsState["paneSelections"];
+        return syncedSelection(rest, state);
+      });
     },
   };
+});
+
+// Switching panes (Ctrl+W, a click) hands the palette's selection to the newly active table.
+useLayoutStore.subscribe((state, prev) => {
+  if (state.activePane === prev.activePane) return;
+  useActionsStore.setState((s) => syncedSelection(s.paneSelections, s));
 });

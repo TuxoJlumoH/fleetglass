@@ -178,6 +178,25 @@ export function startOverview(clusters: readonly string[]): void {
     });
 }
 
+// Mounted overview pages (both split panes can show one). They share the subscription, which
+// closes when the last of them unmounts.
+let users = 0;
+
+/**
+ * Registers a user of the overview subscription; the returned release closes it once no user
+ * is left. Pair with `startOverview`, which opens (or keeps) the subscription itself.
+ */
+export function retainOverview(): () => void {
+  users += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    users -= 1;
+    if (users === 0) stopOverview();
+  };
+}
+
 /** Closes the subscription, if any. Safe while `subscribe_overview` is still in flight. */
 export function stopOverview(): void {
   const sub = current;

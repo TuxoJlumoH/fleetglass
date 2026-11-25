@@ -177,6 +177,18 @@ body,
   display: flex;
   align-items: stretch;
   border-right: 1px solid var(--border);
+  cursor: grab;
+  user-select: none;
+}
+
+.tabs__item--dragging {
+  opacity: 0.4;
+  cursor: grabbing;
+}
+
+.tabs__item--dragover {
+  background: var(--bg-hover);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .tabs__tab {
@@ -4034,6 +4046,11 @@ button.pf-bar__link {
   min-height: 0;
   overflow: auto;
   position: relative;
+  outline: none;
+}
+
+.split-pane--active {
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 .split-pane--primary {
@@ -4045,6 +4062,18 @@ button.pf-bar__link {
   display: flex;
   flex-direction: column;
   background: var(--bg);
+}
+
+.shell-secondary--dropzone {
+  outline: 2px dashed var(--accent);
+  background: var(--bg-hover);
+}
+
+.secondary-yaml-container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .split-pane__toolbar {
@@ -4452,6 +4481,17 @@ button.pf-bar__link {
   flex: 1;
   min-height: 0;
   overflow: auto;
+}
+
+.secondary-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 24px;
+  color: var(--fg-muted);
+  font-size: 13px;
+  text-align: center;
 }
 
 .shell-view-placeholder {

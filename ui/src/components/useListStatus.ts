@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { usePodsStore } from "../stores/pods";
+import { useStore } from "zustand";
+import { type PodsStore, usePodsStore } from "../stores/pods";
 import {
   type AccessNotice,
   accessNotices,
@@ -37,12 +38,15 @@ export interface ListStatus {
  * (03-03b): access notices, metrics notices, loading progress and the counts summary, which is
  * only claimed when every queried store is Ready.
  */
-export function useListStatus(kind: string): ListStatus {
-  const querySpec = usePodsStore((s) => s.querySpec);
-  const access = usePodsStore((s) => s.access);
-  const error = usePodsStore((s) => s.error);
-  const pageLoaded = usePodsStore((s) => s.pageLoaded);
-  const statusCounts = usePodsStore((s) => s.statusCounts);
+export function useListStatus(
+  kind: string,
+  podsStore: PodsStore = usePodsStore,
+): ListStatus {
+  const querySpec = useStore(podsStore, (s) => s.querySpec);
+  const access = useStore(podsStore, (s) => s.access);
+  const error = useStore(podsStore, (s) => s.error);
+  const pageLoaded = useStore(podsStore, (s) => s.pageLoaded);
+  const statusCounts = useStore(podsStore, (s) => s.statusCounts);
 
   const queried = querySpec.clusters;
   const queryTarget = `${querySpec.kinds.join(",")}\n${queried.join(",")}`;

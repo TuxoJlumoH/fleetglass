@@ -40,6 +40,7 @@ import {
   useActionsStore,
 } from "../stores/actions";
 import { useContextsStore } from "../stores/contexts";
+import type { PaneId } from "../stores/layout";
 import type { Cell, Row } from "../stores/pods";
 import { useResourceDetailStore } from "../stores/resourceDetail";
 import { formatAge } from "./age";
@@ -97,6 +98,8 @@ export interface ResourceDrawerProps {
    */
   remoteOps?: boolean;
   onOpenInBrowser?: ((url: string) => void | Promise<void>) | undefined;
+  /** Split pane showing the drawer; its actions open the confirm dialog there. */
+  pane?: PaneId;
 }
 
 const DEFAULT_TABS: readonly DrawerTab[] = ["Summary", "YAML", "Logs", "Events"];
@@ -303,6 +306,7 @@ export function ResourceDrawer({
   variant = "drawer",
   remoteOps = true,
   onOpenInBrowser,
+  pane = "primary",
 }: ResourceDrawerProps) {
   const screen = variant === "screen";
   const asideRef = useRef<HTMLElement | null>(null);
@@ -496,13 +500,13 @@ export function ResourceDrawer({
   const scaleAction = canScale(row) ? scaleActionFor(row) : null;
   const restartAction = canRestart(row) ? restartActionFor(row) : null;
   const requestRestart = () => {
-    if (restartAction) useActionsStore.getState().request(restartAction);
+    if (restartAction) useActionsStore.getState().request(restartAction, pane);
   };
   const requestScale = () => {
-    if (scaleAction) useActionsStore.getState().request(scaleAction);
+    if (scaleAction) useActionsStore.getState().request(scaleAction, pane);
   };
   const requestDelete = () => {
-    useActionsStore.getState().request(deleteActionFor(row));
+    useActionsStore.getState().request(deleteActionFor(row), pane);
   };
 
   /**
@@ -619,7 +623,7 @@ export function ResourceDrawer({
             label: "Reconcile",
             icon: RefreshCw,
             onClick: () => {
-              useActionsStore.getState().request(fluxReconcileActionFor(row));
+              useActionsStore.getState().request(fluxReconcileActionFor(row), pane);
             },
             disabledReason: readOnlyReason,
           },
@@ -628,7 +632,7 @@ export function ResourceDrawer({
             label: "Suspend",
             icon: Pause,
             onClick: () => {
-              useActionsStore.getState().request(fluxSuspendActionFor(row, true));
+              useActionsStore.getState().request(fluxSuspendActionFor(row, true), pane);
             },
             disabledReason: readOnlyReason,
           },
@@ -637,7 +641,7 @@ export function ResourceDrawer({
             label: "Resume",
             icon: Play,
             onClick: () => {
-              useActionsStore.getState().request(fluxSuspendActionFor(row, false));
+              useActionsStore.getState().request(fluxSuspendActionFor(row, false), pane);
             },
             disabledReason: readOnlyReason,
           },
@@ -650,7 +654,7 @@ export function ResourceDrawer({
             label: "Promote",
             icon: Play,
             onClick: () => {
-              useActionsStore.getState().request(argoRolloutPromoteActionFor(row, false));
+              useActionsStore.getState().request(argoRolloutPromoteActionFor(row, false), pane);
             },
             disabledReason: readOnlyReason,
           },
@@ -659,7 +663,7 @@ export function ResourceDrawer({
             label: "Promote Full",
             icon: FastForward,
             onClick: () => {
-              useActionsStore.getState().request(argoRolloutPromoteActionFor(row, true));
+              useActionsStore.getState().request(argoRolloutPromoteActionFor(row, true), pane);
             },
             disabledReason: readOnlyReason,
           },
@@ -668,7 +672,7 @@ export function ResourceDrawer({
             label: "Abort",
             icon: X,
             onClick: () => {
-              useActionsStore.getState().request(argoRolloutAbortActionFor(row));
+              useActionsStore.getState().request(argoRolloutAbortActionFor(row), pane);
             },
             disabledReason: readOnlyReason,
           },
@@ -677,7 +681,7 @@ export function ResourceDrawer({
             label: "Retry",
             icon: RotateCcw,
             onClick: () => {
-              useActionsStore.getState().request(argoRolloutRetryActionFor(row));
+              useActionsStore.getState().request(argoRolloutRetryActionFor(row), pane);
             },
             disabledReason: readOnlyReason,
           },
@@ -690,7 +694,7 @@ export function ResourceDrawer({
             label: "Sync",
             icon: RefreshCw,
             onClick: () => {
-              useActionsStore.getState().request(argoAppSyncActionFor(row));
+              useActionsStore.getState().request(argoAppSyncActionFor(row), pane);
             },
             disabledReason: readOnlyReason,
           },
@@ -703,7 +707,7 @@ export function ResourceDrawer({
             label: "Renew",
             icon: RefreshCw,
             onClick: () => {
-              useActionsStore.getState().request(certRenewActionFor(row));
+              useActionsStore.getState().request(certRenewActionFor(row), pane);
             },
             disabledReason: readOnlyReason,
           },
@@ -716,7 +720,7 @@ export function ResourceDrawer({
             label: "Force Sync",
             icon: RefreshCw,
             onClick: () => {
-              useActionsStore.getState().request(externalSecretForceSyncActionFor(row));
+              useActionsStore.getState().request(externalSecretForceSyncActionFor(row), pane);
             },
             disabledReason: readOnlyReason,
           },

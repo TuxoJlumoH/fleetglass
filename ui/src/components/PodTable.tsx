@@ -19,7 +19,7 @@ import {
   type PendingAction,
 } from "../stores/actions";
 import { clustersForQuery, useContextsStore } from "../stores/contexts";
-import { useLayoutStore } from "../stores/layout";
+import { type PaneId, useLayoutStore } from "../stores/layout";
 import {
   PAGE_SIZE,
   ROW_STATUSES,
@@ -28,8 +28,8 @@ import {
   type Row,
   type RowStatus,
   sortFieldsEqual,
-  stopLiveUpdates,
   usePodsStore,
+  useSecondaryPodsStore,
 } from "../stores/pods";
 import { useResourceDetailStore } from "../stores/resourceDetail";
 import { ROW_HEIGHTS, useSettingsStore } from "../stores/settings";
@@ -271,23 +271,52 @@ function resolveSelection(
     : { index, uid, query };
 }
 
+/**
+ * Remembers the table's filters where its pane keeps its state: the active tab for the primary
+ * pane, the layout store's secondary fields for the secondary one. The query itself is
+ * re-issued by the caller; the secondary pane's view is never keyed by these values.
+ */
+function saveFilters(pane: PaneId, patch: { textFilter?: string; namespace?: string | null }) {
+  const layout = useLayoutStore.getState();
+  if (pane === "secondary") {
+    if (patch.textFilter !== undefined) layout.setSecondaryTextFilter(patch.textFilter);
+    if (patch.namespace !== undefined) layout.setSecondaryNamespace(patch.namespace);
+  } else {
+    layout.updateTabState(layout.activeTabId, patch);
+  }
+}
+
 export interface PodTableProps {
   /** Resource kind listed by this table (the active tab's `kind`). Defaults to Pods. */
   kind?: string;
   /** Text filter restored when the table mounts for a tab (the tab's saved filter). */
   initialTextFilter?: string;
+  /** Namespace filter restored on mount; `null` clears it, `undefined` keeps the current one. */
+  initialNamespace?: string | null;
+  /** Split pane showing the table; picks its own query store, columns, drawer and dialogs. */
+  paneId?: PaneId;
+  /** Clusters to query instead of the sidebar's selection (a pane pinned to one cluster). */
+  clusters?: string[];
 }
 
 /** Virtualised resource table for one kind; named for its origin as the pods table. */
-export function PodTable({ kind = "Pod", initialTextFilter }: PodTableProps = {}) {
+export function PodTable({
+  kind = "Pod",
+  initialTextFilter,
+  initialNamespace,
+  paneId = "primary",
+  clusters: propClusters,
+}: PodTableProps = {}) {
+  const podsStore = paneId === "secondary" ? useSecondaryPodsStore : usePodsStore;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const filterInputRef = useRef<HTMLInputElement | null>(null);
   const [selection, setSelection] = useState<Selection>({ index: 0, uid: null, query: "" });
-  const drawerRow = useResourceDetailStore((s) => s.target);
-  const drawerDetail = useResourceDetailStore((s) => s.detail);
-  const drawerLoading = useResourceDetailStore((s) => s.loading);
-  const drawerError = useResourceDetailStore((s) => s.error);
+  // The drawer store is shared by both panes; this table only shows a drawer opened in it.
+  const drawerRow = useResourceDetailStore((s) => (s.ownerPane === paneId ? s.target : null));
+  const drawerDetail = useResourceDetailStore((s) => (s.ownerPane === paneId ? s.detail : null));
+  const drawerLoading = useResourceDetailStore((s) => s.ownerPane === paneId && s.loading);
+  const drawerError = useResourceDetailStore((s) => (s.ownerPane === paneId ? s.error : null));
   // Mirrors `selection` synchronously so key handlers never read a stale value. Handlers still
   // re-anchor it against the store's current rows (`resolveSelection`) before using it.
   const selectedRef = useRef<Selection>({ index: 0, uid: null, query: "" });
@@ -307,19 +336,19 @@ export function PodTable({ kind = "Pod", initialTextFilter }: PodTableProps = {}
     };
   }, []);
 
-  const querySpec = usePodsStore((s) => s.querySpec);
-  const total = usePodsStore((s) => s.total);
-  const rowsByIndex = usePodsStore((s) => s.rowsByIndex);
-  const error = usePodsStore((s) => s.error);
-  const setTextFilter = usePodsStore((s) => s.setTextFilter);
-  const setNamespaceFilter = usePodsStore((s) => s.setNamespaceFilter);
-  const setStatusFilter = usePodsStore((s) => s.setStatusFilter);
-  const statusCounts = usePodsStore((s) => s.statusCounts);
-  const toggleSort = usePodsStore((s) => s.toggleSort);
-  const ensureRange = usePodsStore((s) => s.ensureRange);
-  const loading = usePodsStore((s) => s.loading);
-  const setClusters = usePodsStore((s) => s.setClusters);
-  const setKind = usePodsStore((s) => s.setKind);
+  const querySpec = podsStore((s) => s.querySpec);
+  const total = podsStore((s) => s.total);
+  const rowsByIndex = podsStore((s) => s.rowsByIndex);
+  const error = podsStore((s) => s.error);
+  const setTextFilter = podsStore((s) => s.setTextFilter);
+  const setNamespaceFilter = podsStore((s) => s.setNamespaceFilter);
+  const setStatusFilter = podsStore((s) => s.setStatusFilter);
+  const statusCounts = podsStore((s) => s.statusCounts);
+  const toggleSort = podsStore((s) => s.toggleSort);
+  const ensureRange = podsStore((s) => s.ensureRange);
+  const loading = podsStore((s) => s.loading);
+  const setClusters = podsStore((s) => s.setClusters);
+  const setKind = podsStore((s) => s.setKind);
 
   useEffect(() => {
     const text = querySpec.textFilter;
@@ -343,36 +372,48 @@ export function PodTable({ kind = "Pod", initialTextFilter }: PodTableProps = {}
   }, [querySpec.textFilter]);
 
   // The tab's kind drives `querySpec.kinds`. Runs before the clusters effect so a remount for
-  // another kind never reopens a live subscription for the previous kind first.
+  // another kind never reopens a live subscription for the previous kind first. The saved text
+  // and namespace filters are applied in the same requery.
   const initialFilterRef = useRef(initialTextFilter);
+  const initialNamespacesRef = useRef(
+    initialNamespace === undefined ? undefined : initialNamespace === null ? [] : [initialNamespace],
+  );
   useEffect(() => {
-    void setKind(kind, initialFilterRef.current);
+    void setKind(kind, initialFilterRef.current, initialNamespacesRef.current);
   }, [setKind, kind]);
   // The query follows the sidebar: cluster group / multi-selection, else the selected context.
   // Selected as a joined string so unrelated contexts-store updates keep the same value.
-  const clustersKey = useContextsStore((s) => clustersForQuery(s).join("\n"));
-  const isMultiCluster = useContextsStore((s) => clustersForQuery(s).length > 1);
+  const contextClustersKey = useContextsStore((s) => clustersForQuery(s).join("\n"));
+  const contextIsMultiCluster = useContextsStore((s) => clustersForQuery(s).length > 1);
+  const clustersKey = propClusters ? propClusters.join("\n") : contextClustersKey;
+  const isMultiCluster = propClusters ? propClusters.length > 1 : contextIsMultiCluster;
   // Settings changes (e.g. cluster colours) trigger re-render of cluster badges.
   useContextsStore((s) => s.settingsByContext);
   useEffect(() => {
     void setClusters(clustersKey === "" ? [] : clustersKey.split("\n"));
   }, [setClusters, clustersKey]);
-  useEffect(() => stopLiveUpdates, []);
+  useEffect(
+    () => () => {
+      podsStore.getState().stopLive();
+    },
+    [podsStore],
+  );
   // The drawer belongs to this table; leaving the view closes it and drops in-flight fetches.
   useEffect(
     () => () => {
-      useResourceDetailStore.getState().close();
+      const drawer = useResourceDetailStore.getState();
+      if (drawer.target !== null && drawer.ownerPane === paneId) drawer.close();
     },
-    [],
+    [paneId],
   );
   // Pending actions and the palette's selection belong to this table, too.
   useEffect(
     () => () => {
       const actions = useActionsStore.getState();
-      actions.setSelection(null);
-      actions.cancel();
+      actions.clearSelection(paneId);
+      if (actions.pendingPane === paneId) actions.cancel();
     },
-    [],
+    [paneId],
   );
   useEffect(() => {
     if (actionSuccess === null) return;
@@ -405,7 +446,7 @@ export function PodTable({ kind = "Pod", initialTextFilter }: PodTableProps = {}
     progress,
     allReady,
     summary,
-  } = useListStatus(kind);
+  } = useListStatus(kind, podsStore);
 
   const noun = kindNoun(kind);
   // Columns follow the kind; kinds without a known layout follow the cells of a returned row.
@@ -426,7 +467,7 @@ export function PodTable({ kind = "Pod", initialTextFilter }: PodTableProps = {}
     return [pinnedClusterCol, ...rest];
   }, [baseColumns, isMultiCluster]);
   // Column picker: hidden columns per kind, by label; pinned columns (name, status) stay.
-  const hiddenColumns = useTableColumnsStore((s) => hiddenColumnsOf(s, kind));
+  const hiddenColumns = useTableColumnsStore((s) => hiddenColumnsOf(s, kind, paneId));
   const toggleColumn = useTableColumnsStore((s) => s.toggleColumn);
   const showAllColumns = useTableColumnsStore((s) => s.showAll);
   const columns = useMemo(
@@ -480,12 +521,15 @@ export function PodTable({ kind = "Pod", initialTextFilter }: PodTableProps = {}
   }, [ensureRange, firstIndex, lastIndex]);
 
   // Anchors the selection to the row now at `index` (keyboard moves, clicks, focus).
-  const selectRow = useCallback((index: number) => {
-    const { rowsByIndex: rows, querySpec: spec } = usePodsStore.getState();
-    const next: Selection = { index, uid: rows[index]?.uid ?? null, query: queryIdentity(spec) };
-    selectedRef.current = next;
-    setSelection(next);
-  }, []);
+  const selectRow = useCallback(
+    (index: number) => {
+      const { rowsByIndex: rows, querySpec: spec } = podsStore.getState();
+      const next: Selection = { index, uid: rows[index]?.uid ?? null, query: queryIdentity(spec) };
+      selectedRef.current = next;
+      setSelection(next);
+    },
+    [podsStore],
+  );
 
   // Rows moved or changed under the selection: follow its row (or adopt the row now at the
   // clamped index). Adjusting state during render avoids a frame with the wrong row selected.
@@ -563,9 +607,9 @@ export function PodTable({ kind = "Pod", initialTextFilter }: PodTableProps = {}
   const openDrawer = useCallback(
     (row: Row, index: number) => {
       selectRow(index);
-      void useResourceDetailStore.getState().open(row);
+      void useResourceDetailStore.getState().open(row, paneId);
     },
-    [selectRow],
+    [selectRow, paneId],
   );
 
   // Restores focus to the row with `uid`, matched by uid so a re-sorted or re-filtered table
@@ -578,7 +622,7 @@ export function PodTable({ kind = "Pod", initialTextFilter }: PodTableProps = {}
     }
     pendingFocusRef.current = { uid };
     if (flushPendingFocus()) return;
-    const entry = Object.entries(usePodsStore.getState().rowsByIndex).find(
+    const entry = Object.entries(podsStore.getState().rowsByIndex).find(
       ([, r]) => r.uid === uid,
     );
     if (!entry) {
@@ -600,13 +644,14 @@ export function PodTable({ kind = "Pod", initialTextFilter }: PodTableProps = {}
     } else {
       giveUp();
     }
-  }, [flushPendingFocus, virtualizer]);
+  }, [flushPendingFocus, virtualizer, podsStore]);
 
   const handleCloseDrawer = useCallback(() => {
-    const origin = useResourceDetailStore.getState().target;
-    useResourceDetailStore.getState().close();
-    restoreFocusTo(origin?.uid ?? null);
-  }, [restoreFocusTo]);
+    const drawer = useResourceDetailStore.getState();
+    if (drawer.target === null || drawer.ownerPane !== paneId) return;
+    drawer.close();
+    restoreFocusTo(drawer.target.uid);
+  }, [restoreFocusTo, paneId]);
 
   const handleActionClosed = useCallback(
     (pending: PendingAction) => {
@@ -618,8 +663,8 @@ export function PodTable({ kind = "Pod", initialTextFilter }: PodTableProps = {}
   // Keeps the command palette's "actions for the selected resource" in sync.
   const selectedRow = rowsByIndex[selectedRowIndex] ?? null;
   useEffect(() => {
-    useActionsStore.getState().setSelection(selectedRow);
-  }, [selectedRow]);
+    useActionsStore.getState().setSelection(selectedRow, paneId);
+  }, [selectedRow, paneId]);
 
   const moveSelection = (index: number, target: EventTarget | null) => {
     selectRow(index);
@@ -653,7 +698,7 @@ export function PodTable({ kind = "Pod", initialTextFilter }: PodTableProps = {}
     // navigation from there.
     if (isInsideToolbar(e.target)) return;
 
-    const { total: count, rowsByIndex: rows, querySpec: spec } = usePodsStore.getState();
+    const { total: count, rowsByIndex: rows, querySpec: spec } = podsStore.getState();
     const last = Math.max(0, count - 1);
     const current = resolveSelection(rows, count, queryIdentity(spec), selectedRef.current).index;
     const currentRow = rows[current];
@@ -664,7 +709,7 @@ export function PodTable({ kind = "Pod", initialTextFilter }: PodTableProps = {}
       e.preventDefault();
       if (currentRow) {
         setActionNotice(null);
-        useActionsStore.getState().request(deleteActionFor(currentRow));
+        useActionsStore.getState().request(deleteActionFor(currentRow), paneId);
       }
     } else if (e.key === "s" || e.key === "r") {
       if (!currentRow) return;
@@ -673,12 +718,13 @@ export function PodTable({ kind = "Pod", initialTextFilter }: PodTableProps = {}
         e.key === "s" ? scaleActionFor(currentRow) : restartActionFor(currentRow);
       if (pending) {
         setActionNotice(null);
-        useActionsStore.getState().request(pending);
+        useActionsStore.getState().request(pending, paneId);
       } else {
         setActionNotice(workloadOnlyNotice(e.key === "s" ? "Scale" : "Restart", currentRow));
       }
     } else if (e.key === "Escape") {
-      if (useResourceDetailStore.getState().target) {
+      const drawer = useResourceDetailStore.getState();
+      if (drawer.target !== null && drawer.ownerPane === paneId) {
         e.preventDefault();
         handleCloseDrawer();
       }
@@ -719,6 +765,9 @@ export function PodTable({ kind = "Pod", initialTextFilter }: PodTableProps = {}
 
   useEffect(() => {
     const onWindowKeyDown = (e: globalThis.KeyboardEvent) => {
+      // With two tables on screen, only the active pane's answers keys from outside both.
+      const { splitMode, activePane } = useLayoutStore.getState();
+      if (splitMode !== "none" && paneId !== activePane) return;
       if (
         containerRef.current &&
         e.target instanceof Node &&
@@ -726,10 +775,13 @@ export function PodTable({ kind = "Pod", initialTextFilter }: PodTableProps = {}
       ) {
         return;
       }
+      // Only keys with no other owner: the page itself or a focused (empty) pane. Toolbars,
+      // buttons, selects and editors elsewhere keep their keys.
       if (
         e.target instanceof HTMLElement &&
         e.target !== document.body &&
-        e.target !== document.documentElement
+        e.target !== document.documentElement &&
+        !e.target.classList.contains("split-pane")
       ) {
         return;
       }
@@ -739,7 +791,7 @@ export function PodTable({ kind = "Pod", initialTextFilter }: PodTableProps = {}
     return () => {
       window.removeEventListener("keydown", onWindowKeyDown);
     };
-  }, []);
+  }, [paneId]);
 
   const currentSort = querySpec.sort;
 
@@ -748,6 +800,7 @@ export function PodTable({ kind = "Pod", initialTextFilter }: PodTableProps = {}
       ref={containerRef}
       className="pod-table-container"
       tabIndex={0}
+      data-pane-id={paneId}
       onKeyDown={onContainerKeyDown}
     >
       <div className="pod-table-layout">
@@ -774,8 +827,7 @@ export function PodTable({ kind = "Pod", initialTextFilter }: PodTableProps = {}
                 value={querySpec.textFilter ?? ""}
                 onChange={(e) => {
                   const val = e.target.value;
-                  const { activeTabId, updateTabState } = useLayoutStore.getState();
-                  updateTabState(activeTabId, { textFilter: val });
+                  saveFilters(paneId, { textFilter: val });
                   void setTextFilter(val);
                 }}
               />
@@ -859,8 +911,7 @@ export function PodTable({ kind = "Pod", initialTextFilter }: PodTableProps = {}
                         } else {
                           nextFilter = `${currentFilter} ${pill.filter}`.trim();
                         }
-                        const { activeTabId, updateTabState } = useLayoutStore.getState();
-                        updateTabState(activeTabId, { textFilter: nextFilter });
+                        saveFilters(paneId, { textFilter: nextFilter });
                         void setTextFilter(nextFilter);
                       }}
                     >
@@ -887,10 +938,7 @@ export function PodTable({ kind = "Pod", initialTextFilter }: PodTableProps = {}
                     .split(",")
                     .map((ns) => ns.trim())
                     .filter((ns) => ns.length > 0);
-                  const { activeTabId, updateTabState } = useLayoutStore.getState();
-                  updateTabState(activeTabId, {
-                    namespace: namespaces[0] ?? null,
-                  });
+                  saveFilters(paneId, { namespace: namespaces[0] ?? null });
                   void setNamespaceFilter(namespaces);
                 }}
               />
@@ -946,13 +994,13 @@ export function PodTable({ kind = "Pod", initialTextFilter }: PodTableProps = {}
                   checked: !hiddenColumns.includes(c.label),
                 }))}
               onToggle={(key) => {
-                toggleColumn(kind, key);
+                toggleColumn(kind, key, paneId);
               }}
               reset={{
                 label: "Show all",
                 disabled: !anyColumnHidden,
                 onReset: () => {
-                  showAllColumns(kind);
+                  showAllColumns(kind, paneId);
                 },
               }}
             />
@@ -1195,10 +1243,11 @@ export function PodTable({ kind = "Pod", initialTextFilter }: PodTableProps = {}
             loading={drawerLoading}
             error={drawerError}
             onClose={handleCloseDrawer}
+            pane={paneId}
           />
         )}
       </div>
-      <ActionConfirmDialog onClosed={handleActionClosed} />
+      <ActionConfirmDialog onClosed={handleActionClosed} pane={paneId} />
     </div>
   );
 }

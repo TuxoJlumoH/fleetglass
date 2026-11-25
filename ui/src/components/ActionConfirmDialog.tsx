@@ -7,7 +7,7 @@ import {
 } from "react";
 import { useBackLayer } from "../lib/backLayers";
 import { useContextsStore } from "../stores/contexts";
-import { useLayoutStore } from "../stores/layout";
+import { type PaneId, useLayoutStore } from "../stores/layout";
 import {
   actionTargetName,
   describeTarget,
@@ -22,6 +22,8 @@ export type ActionDialogOutcome = "cancelled" | "done";
 export interface ActionConfirmDialogProps {
   /** Called after the dialog closed, with the action it was open for (focus restore). */
   onClosed?: (pending: PendingAction, outcome: ActionDialogOutcome) => void;
+  /** Split pane this dialog is mounted in; it only opens for actions requested in that pane. */
+  pane?: PaneId;
 }
 
 const TITLES: Record<PendingAction["action"]["type"], string> = {
@@ -76,8 +78,8 @@ function backendErrorText(kind: string | null, message: string): string {
  * asks for the exact resource name on protected ones. The backend enforces both guards
  * again; its errors are shown here as they come back.
  */
-export function ActionConfirmDialog({ onClosed }: ActionConfirmDialogProps) {
-  const pending = useActionsStore((s) => s.pending);
+export function ActionConfirmDialog({ onClosed, pane = "primary" }: ActionConfirmDialogProps) {
+  const pending = useActionsStore((s) => (s.pendingPane === pane ? s.pending : null));
   const requestId = useActionsStore((s) => s.requestId);
   if (!pending) return null;
   // Keyed by request so the typed name never carries over to another action.

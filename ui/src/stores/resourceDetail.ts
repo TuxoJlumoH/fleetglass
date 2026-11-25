@@ -1,21 +1,28 @@
 import { create } from "zustand";
 import { commands, type ResourceDetail } from "../generated/bindings";
+import type { PaneId } from "./layout";
 import type { Row } from "./pods";
 
 /** Fetch state for the resource detail drawer (`get_resource_detail`, R-04). */
 export interface ResourceDetailState {
   /** Row the drawer is open for; `null` means the drawer is closed. */
   target: Row | null;
+  /** Split pane whose view shows the drawer; only that pane renders or closes it. */
+  ownerPane: PaneId;
   detail: ResourceDetail | null;
   loading: boolean;
   error: string | null;
-  /** Opens the drawer for `row` and fetches its detail. Supersedes any in-flight request. */
-  open: (row: Row) => Promise<void>;
+  /**
+   * Opens the drawer for `row` in `pane` and fetches its detail. Supersedes any in-flight
+   * request. Without `pane`, an open drawer stays in its pane (a related link), else "primary".
+   */
+  open: (row: Row, pane?: PaneId) => Promise<void>;
   close: () => void;
 }
 
 export const initialResourceDetailState = {
   target: null as Row | null,
+  ownerPane: "primary" as PaneId,
   detail: null as ResourceDetail | null,
   loading: false,
   error: null as string | null,
@@ -38,12 +45,14 @@ export function resetResourceDetailStore(): void {
   useResourceDetailStore.setState({ ...initialResourceDetailState });
 }
 
-export const useResourceDetailStore = create<ResourceDetailState>()((set) => ({
+export const useResourceDetailStore = create<ResourceDetailState>()((set, get) => ({
   ...initialResourceDetailState,
-  open: async (row) => {
+  open: async (row, pane) => {
     generation += 1;
     const gen = generation;
-    set({ target: row, detail: null, loading: true, error: null });
+    const current = get();
+    const ownerPane = pane ?? (current.target !== null ? current.ownerPane : "primary");
+    set({ target: row, ownerPane, detail: null, loading: true, error: null });
     try {
       const res = await commands.getResourceDetail(
         row.cluster,

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { clustersForQuery, useContextsStore } from "../stores/contexts";
-import { useLayoutStore } from "../stores/layout";
-import { type OverviewData, startOverview, stopOverview, useOverviewStore } from "../stores/overview";
+import { type PaneId, useLayoutStore } from "../stores/layout";
+import { type OverviewData, retainOverview, startOverview, useOverviewStore } from "../stores/overview";
 import type { Row } from "../stores/pods";
 import { useResourceDetailStore } from "../stores/resourceDetail";
 
@@ -40,7 +40,7 @@ export function useConnectCluster(): (cluster: string) => void {
  * The overview subscription for the queried clusters, plus their persisted settings (colours,
  * protected flags). Shared by the desktop page and the mobile overview (03-03a).
  */
-export function useOverviewSubscription(): void {
+export function useOverviewSubscription(paneId: PaneId = "primary"): void {
   const ensureSettings = useContextsStore((s) => s.ensureSettings);
   const data = useOverviewStore((s) => s.data);
   // Same clusters as the resource tables: the active selection, else the selected context.
@@ -51,13 +51,15 @@ export function useOverviewSubscription(): void {
   useEffect(() => {
     startOverview(clustersKey === "" ? [] : clustersKey.split("\n"));
   }, [clustersKey]);
-  useEffect(() => stopOverview, []);
+  // Shared with an overview in the other split pane: closed when the last one unmounts.
+  useEffect(() => retainOverview(), []);
   // The drawer belongs to this view; leaving it closes the drawer and drops in-flight fetches.
   useEffect(
     () => () => {
-      useResourceDetailStore.getState().close();
+      const drawer = useResourceDetailStore.getState();
+      if (drawer.target !== null && drawer.ownerPane === paneId) drawer.close();
     },
-    [],
+    [paneId],
   );
   const clusterKey = data?.clusters.map((c) => c.cluster).join("\n") ?? "";
   useEffect(() => {
@@ -83,19 +85,20 @@ export function useOverviewNow(): [number, () => void] {
 }
 
 /** Resource drawer opened from an overview row; closing returns focus to that row. */
-export function useOverviewDrawer(onOpen?: () => void) {
-  const row = useResourceDetailStore((s) => s.target);
-  const detail = useResourceDetailStore((s) => s.detail);
-  const loading = useResourceDetailStore((s) => s.loading);
-  const error = useResourceDetailStore((s) => s.error);
+export function useOverviewDrawer(onOpen?: () => void, paneId: PaneId = "primary") {
+  const mine = useResourceDetailStore((s) => s.ownerPane === paneId);
+  const row = useResourceDetailStore((s) => (mine ? s.target : null));
+  const detail = useResourceDetailStore((s) => (mine ? s.detail : null));
+  const loading = useResourceDetailStore((s) => (mine ? s.loading : false));
+  const error = useResourceDetailStore((s) => (mine ? s.error : null));
   const origin = useRef<HTMLElement | null>(null);
   const open = useCallback(
     (target: Row, from: HTMLElement) => {
       origin.current = from;
       onOpen?.();
-      void useResourceDetailStore.getState().open(target);
+      void useResourceDetailStore.getState().open(target, paneId);
     },
-    [onOpen],
+    [onOpen, paneId],
   );
   const close = useCallback(() => {
     useResourceDetailStore.getState().close();
