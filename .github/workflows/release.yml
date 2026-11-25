@@ -1,5 +1,7 @@
 # Fleetglass Release Pipeline (task P1-16, 03-06).
 #
+# On version tags it also creates a draft GitHub Release with every asset; publish it by hand.
+#
 # Builds signed desktop bundles (.deb, .rpm, .AppImage, .dmg, .msi, .exe) and signed Android APKs
 # (arm64-v8a and x86_64), generates CycloneDX SBOMs from Cargo.lock and ui/pnpm-lock.yaml, and
 # produces SHA-256 checksums for every release artifact.
@@ -23,6 +25,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
+  # Public certificate of the Android release key (alias `fleetglass`).
+  ANDROID_CERT_SHA256: afb0e8f63eb15800122927702cfb84e74fb991af65054f579c7b2b2478d85b11
 
 defaults:
   run:
@@ -40,6 +44,7 @@ jobs:
           - ubuntu-latest
           - ubuntu-24.04-arm
           - macos-latest
+          - macos-15-intel
           - windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -260,12 +265,29 @@ jobs:
           mkdir -p dist-artifacts
           find crates/app/gen/android/app/build/outputs/apk -type f -name "*.apk" | while read -r apk; do
             echo "Found APK: $apk"
-            cp "$apk" dist-artifacts/
             filename="$(basename "$apk")"
             if [[ "$filename" == *"arm64"* ]]; then
               cp "$apk" dist-artifacts/fleetglass-android-arm64-v8a.apk
             elif [[ "$filename" == *"x86_64"* ]]; then
               cp "$apk" dist-artifacts/fleetglass-android-x86_64.apk
+            fi
+          done
+          # Tag builds must ship APKs signed with the project release key; Android refuses
+          # unsigned APKs, and a different key would block updates over earlier installs.
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -n1)apksigner"
+          for apk in dist-artifacts/fleetglass-android-*.apk; do
+            if certs="$("$apksigner" verify --print-certs "$apk" 2>&1)"; then
+              grep -q "SHA-256 digest: $ANDROID_CERT_SHA256" <<< "$certs" || {
+                echo "::error::$apk is signed with an unexpected certificate" >&2
+                echo "$certs" >&2
+                exit 1
+              }
+              echo "$apk: signed with the release key"
+            elif [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+              echo "::error::$apk is not signed; set the ANDROID_KEYSTORE_* secrets" >&2
+              exit 1
+            else
+              echo "::warning::$apk is unsigned (no signing secrets)"
             fi
           done
           cp "sbom-android.json" "sbom-cargo-android.json" dist-artifacts/
@@ -286,3 +308,50 @@ jobs:
         with:
           name: artifacts-android
           path: dist-artifacts/*
+
+  publish:
+    name: Publish GitHub Release (draft)
+    if: github.ref_type == 'tag'
+    needs: [build-bundles, build-android]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: artifacts
+
+      # Per-OS jobs name SBOMs by runner.os, so macOS arm64/x64 and Linux x64/arm64 collide;
+      # prefix them with the matrix entry instead. Per-job checksum files are merged into one.
+      - name: Assemble release assets
+        run: |
+          set -euo pipefail
+          mkdir -p upload
+          for dir in artifacts/artifacts-*; do
+            job="${dir##*/artifacts-}"
+            for f in "$dir"/*; do
+              name="${f##*/}"
+              case "$name" in
+                SHA256SUMS-*|sbom-*.json) ;;
+                *) cp "$f" upload/ ;;
+              esac
+            done
+            cp "$dir"/sbom-cargo-*.json "upload/sbom-cargo-${job}.json"
+          done
+          (cd upload && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt)
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          notes="docs/release-notes/${TAG}.md"
+          if [[ -f "$notes" ]]; then notes_args=(--notes-file "$notes"); else notes_args=(--generate-notes); fi
+          gh release create "$TAG" -R "$GITHUB_REPOSITORY" --verify-tag --draft \
+            --title "Fleetglass ${TAG#v}" "${notes_args[@]}" upload/*
