@@ -6,6 +6,34 @@ All notable changes to Fleetglass are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-25
+
+### Added
+- **Per-namespace watcher fallback:** when a cluster-wide list/watch returns 403, Fleetglass watches the namespaces you can access instead of showing an empty view.
+  - The namespaces come from the new per-context `watchNamespaces` setting. Without it, Fleetglass uses the namespaces you may list, or the context's namespace.
+  - Each one is checked with a `SelfSubjectRulesReview`.
+  - A "Restricted: N namespaces" pill, the Overview and the MCP summary say exactly what's covered.
+- **In-app terminal:** exec, attach and node-debug shells run in an embedded xterm.js terminal.
+  - The remote PTY follows the window and pane size, so `vim`, `top` and `htop` render correctly.
+  - Output is bounded by the scrollback, and colours follow the theme.
+  - Links in the terminal open through the validated, audited browser launcher.
+- **Split view:** split the main view horizontally (`Ctrl+\`) or vertically (`Ctrl+Shift+\`).
+  - Each pane keeps its own query, live updates, scroll position and columns.
+  - Drag a tab onto the second pane; `Ctrl+W` switches panes.
+- **Schema validation in the YAML editor:**
+  - Diagnostics, autocomplete and hover docs come from the cluster's own OpenAPI v3 schemas, so they cover built-in kinds and CRDs at the server's version.
+  - If a cluster can't serve its schema, the editor shows a "Schema unavailable" note instead of guessing.
+- **Open in browser:** one click opens an active port-forward or an Ingress / Gateway / HTTPRoute endpoint.
+  - URLs are validated in the backend and opened without a shell.
+  - Every launch is written to the audit log.
+- **Release builds:** a macOS Intel (`x64`) dmg, Android APKs signed in CI with the release key (the certificate is verified), and draft GitHub Releases created from version tags.
+
+### Changed
+- Updated to kube 5.2 and k8s-openapi 0.29 (Kubernetes 1.37 API). The minimum supported Rust version is now 1.95.
+
+### Fixed
+- Previous logs of a crash-looping container whose old log was already garbage-collected now show a clear message instead of a raw kubelet error line.
+
 ## [0.4.0] - 2026-11-13
 
 ### Added
@@ -63,7 +91,8 @@ First public preview. Tested live on Linux, macOS 13 (Intel) and Windows 11 (x64
 - Optional MCP server (`fleetglass mcp`, stdio, strictly read-only) for external AI tools; nothing runs unless you start it.
 - Performance harness (`crates/bench`) with budgets checked in CI.
 
-[Unreleased]: https://github.com/TuxoJlumoH/fleetglass/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/TuxoJlumoH/fleetglass/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/TuxoJlumoH/fleetglass/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/TuxoJlumoH/fleetglass/compare/v0.2.0...v0.4.0
 [0.2.0]: https://github.com/TuxoJlumoH/fleetglass/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/TuxoJlumoH/fleetglass/releases/tag/v0.1.0
