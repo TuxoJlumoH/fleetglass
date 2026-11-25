@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useBackLayer } from "../lib/backLayers";
+import { useResourceSchemasStore } from "../stores/resourceSchemas";
 import { commands, type DiagnosticReport, type DiagnosticStatus } from "../generated/bindings";
 
 export interface DiagnosticsModalProps {
@@ -83,6 +84,7 @@ export function DiagnosticsModal({
     setReconnecting(true);
     try {
       await commands.reconnectContext(ctx);
+      useResourceSchemasStore.getState().invalidateContext(ctx);
       if (onReconnect) {
         await onReconnect(ctx);
       }

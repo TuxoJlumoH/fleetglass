@@ -146,6 +146,15 @@ export const commands = {
 	getResourceDetail: (context: string, kind: string, namespace: string | null, name: string) => typedError<ResourceDetail_Serialize, IpcError>(__TAURI_INVOKE("get_resource_detail", { context, kind, namespace, name })),
 	/**  Returns the cleaned YAML representation of a Kubernetes resource (`R-03`). */
 	getResourceYaml: (context: string, kind: string, namespace: string | null, name: string) => typedError<string, IpcError>(__TAURI_INVOKE("get_resource_yaml", { context, kind, namespace, name })),
+	/**
+	 *  Returns the JSON schema of `api_version`/`kind` from the cluster's OpenAPI v3 document,
+	 *  for validation, completion and hover docs in the YAML editor (`05-04`).
+	 * 
+	 *  Bounded: one resolved schema, capped in nodes and description length. A schema that
+	 *  cannot be fetched (RBAC, offline, old cluster, unknown kind) is an `unavailable`
+	 *  result, not an error.
+	 */
+	getResourceSchema: (context: string, apiVersion: string, kind: string) => typedError<ResourceSchemaResult, IpcError>(__TAURI_INVOKE("get_resource_schema", { context, apiVersion, kind })),
 	/**  Decodes base64 secret values into (lossy UTF-8) plaintext. */
 	decodeSecretValues: (data: { [key in string]: string }) => typedError<{ [key in string]: string }, IpcError>(__TAURI_INVOKE("decode_secret_values", { data })),
 	/**  Encodes plaintext secret values as base64. */
@@ -1684,6 +1693,23 @@ export type ResourcePair_Serialize = {
 	memory?: string,
 };
 
+/**  JSON schema of one resource kind, taken from the cluster's OpenAPI v3 document. */
+export type ResourceSchemaResult = { state: "available"; apiVersion: string; kind: string; 
+/**
+ *  Self-contained JSON schema (all `$ref`s resolved), serialized as JSON text
+ *  (specta cannot export `serde_json::Value`). Nodes cut for cycles or the size
+ *  cap carry `x-kubernetes-preserve-unknown-fields: true`. At most
+ *  `MAX_SCHEMA_BYTES` (2 MiB).
+ */
+schemaJson: string; 
+/**
+ *  `true` when part of the schema was cut by the node cap or its descriptions
+ *  were dropped by the byte cap.
+ */
+truncated: boolean } | { state: "unavailable"; reason: SchemaUnavailableReason; 
+/**  User-readable explanation, e.g. "no permission to read /openapi/v3". */
+message: string };
+
 /**  A workload/pod candidate surfaced in right-sizing analysis (`04-09`). */
 export type RightSizingItem = RightSizingItem_Serialize | RightSizingItem_Deserialize;
 
@@ -1837,6 +1863,19 @@ export type SavedPortForward = {
 	localPort: number,
 	label: string,
 };
+
+/**  Why a resource schema could not be provided. The editor then validates nothing. */
+export type SchemaUnavailableReason = 
+/**  RBAC denies reading `/openapi/v3` (403/401). */
+"forbidden" | 
+/**  The API server does not publish the group-version or the kind. */
+"notFound" | 
+/**  The API server does not serve OpenAPI v3 (Kubernetes < 1.24 or disabled). */
+"unsupported" | 
+/**  The cluster could not be reached or the client could not be built. */
+"unreachable" | 
+/**  The API server answered with a document Fleetglass cannot use. */
+"badResponse";
 
 /**  Sort order direction for [`QuerySpec`]. */
 export type SortDirection = "asc" | "desc";

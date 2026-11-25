@@ -3,6 +3,7 @@ import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
 import { resetBackLayers } from "../lib/backLayers";
 import { LAST_SELECTION_STORAGE_KEY, resetLastSelectionState } from "../stores/contexts";
+import { resetResourceSchemasStore } from "../stores/resourceSchemas";
 
 afterEach(() => {
   cleanup();
@@ -15,4 +16,6 @@ afterEach(() => {
     // No storage in this environment.
   }
   resetLastSelectionState();
+  // Cluster schemas fetched in one test must not validate the next test's editor.
+  resetResourceSchemasStore();
 });

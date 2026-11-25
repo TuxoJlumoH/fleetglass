@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { YamlEditor } from "./YamlEditor";
 import {
   getYamlEditorExtensions,
@@ -10,7 +10,13 @@ import {
 } from "./yamlEditorExtensions";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
+import { CompletionContext } from "@codemirror/autocomplete";
 import { useSettingsStore } from "../stores/settings";
+import { validateYamlDocument } from "../schema/yamlLinter";
+import { createK8sCompletionSource } from "../schema/yamlAutocomplete";
+import { getK8sHoverTooltip } from "../schema/yamlHover";
+import { forEachDiagnostic } from "@codemirror/lint";
+import { fixtureLookup } from "../schema/__fixtures__/schemas";
 
 describe("YamlEditor", () => {
   it("renders an accessible textarea in jsdom environment", () => {
@@ -115,5 +121,109 @@ describe("YamlEditor", () => {
       />,
     );
     expect(screen.getByLabelText("Resource YAML")).toBeInTheDocument();
+  });
+
+  it("flags unknown fields when editing a deployment YAML (05-04)", () => {
+    const deploymentYaml = `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+spec:
+  replicas: 3
+  unknownSpecField: "not-valid"
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:latest
+`;
+    const state = EditorState.create({
+      doc: deploymentYaml,
+      extensions: getYamlEditorExtensions({ schemaLookup: fixtureLookup }),
+    });
+    const diagnostics = validateYamlDocument(state, fixtureLookup);
+    expect(diagnostics.map((d) => d.message)).toEqual(['Unknown field "unknownSpecField" in spec']);
+    expect(diagnostics[0]?.severity).toBe("warning");
+  });
+
+  it("offers autocomplete for spec properties when editing a deployment YAML (05-04)", async () => {
+    const deploymentYaml = `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+spec:
+  `;
+    const state = EditorState.create({
+      doc: deploymentYaml,
+      extensions: getYamlEditorExtensions({ schemaLookup: fixtureLookup }),
+    });
+    const completionSource = createK8sCompletionSource(fixtureLookup);
+    const result = await Promise.resolve(
+      completionSource(new CompletionContext(state, deploymentYaml.length, true)),
+    );
+    const labels = (result ? result.options : []).map((o) => o.label);
+    expect(labels).toEqual(
+      expect.arrayContaining(["replicas", "selector", "template", "strategy", "minReadySeconds"]),
+    );
+  });
+
+  it("provides hover documentation for spec properties in YamlEditor (05-04)", () => {
+    const deploymentYaml = `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+spec:
+  replicas: 3
+`;
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: deploymentYaml,
+        extensions: getYamlEditorExtensions({ schemaLookup: fixtureLookup }),
+      }),
+    });
+    const tooltip = getK8sHoverTooltip(view, deploymentYaml.indexOf("replicas") + 1, fixtureLookup);
+    if (!tooltip) throw new Error("expected tooltip");
+    const dom = tooltip.create(view).dom;
+    expect(dom.querySelector(".k8s-hover-title")?.textContent).toBe("replicas");
+    expect(dom.querySelector(".k8s-hover-type")?.textContent).toBe("integer");
+    expect(dom.querySelector(".k8s-hover-desc")?.textContent).toContain("Number of desired pods");
+  });
+
+  it("lints only once a schema lookup is passed, and stops when it is removed", async () => {
+    const doc = "apiVersion: apps/v1\nkind: Deployment\nspec:\n  bogus: 1\n  selector: {}\n  template: {}\n";
+    const { container, rerender } = render(<YamlEditor value={doc} forceCodeMirror={true} />);
+    const view = EditorView.findFromDOM(container.querySelector(".cm-editor") as HTMLElement);
+    if (!view) throw new Error("expected an editor view");
+    const count = () => {
+      let n = 0;
+      forEachDiagnostic(view.state, () => {
+        n += 1;
+      });
+      return n;
+    };
+    await new Promise((r) => setTimeout(r, 400));
+    expect(count()).toBe(0);
+
+    rerender(<YamlEditor value={doc} forceCodeMirror={true} schemaLookup={fixtureLookup} />);
+    await waitFor(
+      () => {
+        expect(count()).toBe(1);
+      },
+      { timeout: 2000 },
+    );
+
+    rerender(<YamlEditor value={doc} forceCodeMirror={true} />);
+    await waitFor(
+      () => {
+        expect(count()).toBe(0);
+      },
+      { timeout: 2000 },
+    );
   });
 });

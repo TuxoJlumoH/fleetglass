@@ -35,6 +35,7 @@ pub mod portforward;
 pub mod projection;
 pub mod prometheus;
 pub mod query;
+pub mod schema;
 pub mod settings;
 pub mod shell_env;
 pub mod team_settings;

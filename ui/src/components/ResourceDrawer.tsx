@@ -57,6 +57,7 @@ import { SecretEditor, type SecretCodec } from "./SecretEditor";
 import { STATUS_TONE } from "./statusTone";
 import { WorkloadLogsView } from "./WorkloadLogsView";
 import { YamlEditor } from "./YamlEditor";
+import { useResourceSchemas } from "../schema/useResourceSchemas";
 
 export type DrawerTab = "Summary" | "Secret" | "YAML" | "Logs" | "Terminal" | "Events";
 
@@ -428,6 +429,11 @@ export function ResourceDrawer({
   const isPod = row?.kind === "Pod";
   const tabs = isSecret ? SECRET_TABS : isPod && remoteOps ? POD_TABS : DEFAULT_TABS;
   const activeDrawerTab = tabs.includes(activeTab) ? activeTab : "Summary";
+  // Schemas are fetched only while the YAML tab is shown.
+  const yamlSchemas = useResourceSchemas(
+    clusterKey,
+    activeDrawerTab === "YAML" && !detailMissing ? currentYaml : "",
+  );
 
   const availableContainers = useMemo(() => {
     const list = extractPodContainers(row, detail, currentYaml);
@@ -1375,6 +1381,7 @@ export function ResourceDrawer({
                 className="resource-drawer__yaml-editor"
                 value={currentYaml}
                 readOnly={isReadOnly}
+                schemaLookup={yamlSchemas.lookup}
                 onChange={(value) => {
                   setEditedYaml(value);
                   setDryRunError(null);
@@ -1382,6 +1389,12 @@ export function ResourceDrawer({
                 }}
               />
             )}
+            {!detailMissing &&
+              yamlSchemas.notes.map((note) => (
+                <p key={note} className="resource-drawer__schema-note" data-testid="yaml-schema-note">
+                  {note}
+                </p>
+              ))}
             {dryRunResult && (
               <div className="resource-drawer__dryrun">
                 <pre

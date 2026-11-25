@@ -16,8 +16,8 @@ use fleetglass_core::api::{
     DiffResult, ErrorKind, ExecSpec, HelmReleasePage, HelmReleaseSummary, HelmRevisionDiff,
     IpcError, KindCount, MetricsRange, MutatingAction, MuxLogEvent, OverviewData, Page, PageDelta,
     PluginManifest, PodUsageSeries, PortForwardInfo, PrometheusConfig, PrometheusDetection,
-    QuerySpec, ResourceDetail, RightSizingReport, SavedFile, SavedPortForward, TeamSettingsSummary,
-    UpdateInfo, WorkloadLogTarget, WorkloadSelector,
+    QuerySpec, ResourceDetail, ResourceSchemaResult, RightSizingReport, SavedFile,
+    SavedPortForward, TeamSettingsSummary, UpdateInfo, WorkloadLogTarget, WorkloadSelector,
 };
 use fleetglass_core::audit::AuditLogStore;
 use fleetglass_core::cluster::ClusterManager;
@@ -2179,6 +2179,26 @@ async fn get_resource_yaml(
         .map_err(IpcError::from)
 }
 
+/// Returns the JSON schema of `api_version`/`kind` from the cluster's OpenAPI v3 document,
+/// for validation, completion and hover docs in the YAML editor (`05-04`).
+///
+/// Bounded: one resolved schema, capped in nodes and description length. A schema that
+/// cannot be fetched (RBAC, offline, old cluster, unknown kind) is an `unavailable`
+/// result, not an error.
+#[tauri::command]
+#[specta::specta]
+async fn get_resource_schema(
+    state: tauri::State<'_, AppState>,
+    context: String,
+    api_version: String,
+    kind: String,
+) -> Result<ResourceSchemaResult, IpcError> {
+    Ok(state
+        .manager
+        .resource_schema(&context, &api_version, &kind)
+        .await)
+}
+
 /// Decodes base64 secret values into (lossy UTF-8) plaintext.
 #[tauri::command]
 #[specta::specta]
@@ -3168,6 +3188,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
         compare_resources_with_options,
         get_resource_detail,
         get_resource_yaml,
+        get_resource_schema,
         decode_secret_values,
         encode_secret_values,
         query_apps,

@@ -1,0 +1,492 @@
+{
+ "components": {
+  "schemas": {
+   "dev.fleetglass.example.v1.Widget": {
+    "properties": {
+     "apiVersion": {
+      "type": "string"
+     },
+     "kind": {
+      "type": "string"
+     },
+     "metadata": {
+      "type": "object"
+     },
+     "spec": {
+      "properties": {
+       "config": {
+        "type": "object",
+        "x-kubernetes-preserve-unknown-fields": true
+       },
+       "mode": {
+        "default": "safe",
+        "enum": [
+         "fast",
+         "safe"
+        ],
+        "type": "string"
+       },
+       "size": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "string"
+         }
+        ],
+        "x-kubernetes-int-or-string": true
+       },
+       "template": {
+        "type": "object",
+        "x-kubernetes-embedded-resource": true,
+        "x-kubernetes-preserve-unknown-fields": true
+       }
+      },
+      "required": [
+       "size"
+      ],
+      "type": "object"
+     },
+     "status": {
+      "type": "object",
+      "x-kubernetes-preserve-unknown-fields": true
+     }
+    },
+    "type": "object",
+    "x-kubernetes-group-version-kind": [
+     {
+      "group": "example.fleetglass.dev",
+      "kind": "Widget",
+      "version": "v1"
+     }
+    ]
+   },
+   "io.example.v1.JSONSchemaProps": {
+    "description": "JSONSchemaProps is a JSON-Schema following Specification Draft 4.",
+    "properties": {
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/io.example.v1.JSONSchemaProps"
+      },
+      "type": "array"
+     },
+     "not": {
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/io.example.v1.JSONSchemaProps"
+       }
+      ],
+      "description": "Inverted schema."
+     },
+     "properties": {
+      "additionalProperties": {
+       "allOf": [
+        {
+         "$ref": "#/components/schemas/io.example.v1.JSONSchemaProps"
+        }
+       ],
+       "default": {}
+      },
+      "type": "object"
+     },
+     "type": {
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "io.k8s.api.apps.v1.Deployment": {
+    "description": "Deployment enables declarative updates for Pods and ReplicaSets.",
+    "properties": {
+     "apiVersion": {
+      "description": "APIVersion defines the versioned schema of this representation of an object.",
+      "type": "string"
+     },
+     "kind": {
+      "description": "Kind is a string value representing the REST resource this object represents.",
+      "type": "string"
+     },
+     "metadata": {
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta"
+       }
+      ],
+      "default": {},
+      "description": "Standard object's metadata."
+     },
+     "spec": {
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/io.k8s.api.apps.v1.DeploymentSpec"
+       }
+      ],
+      "default": {},
+      "description": "Specification of the desired behavior of the Deployment."
+     },
+     "status": {
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/io.k8s.api.apps.v1.DeploymentStatus"
+       }
+      ],
+      "default": {},
+      "description": "Most recently observed status of the Deployment."
+     }
+    },
+    "required": [
+     "spec"
+    ],
+    "type": "object",
+    "x-kubernetes-group-version-kind": [
+     {
+      "group": "apps",
+      "kind": "Deployment",
+      "version": "v1"
+     }
+    ]
+   },
+   "io.k8s.api.apps.v1.DeploymentSpec": {
+    "description": "DeploymentSpec is the specification of the desired behavior of the Deployment.",
+    "properties": {
+     "minReadySeconds": {
+      "description": "Minimum number of seconds for which a newly created pod should be ready without any of its container crashing, for it to be considered available.",
+      "format": "int32",
+      "type": "integer"
+     },
+     "paused": {
+      "description": "Indicates that the deployment is paused.",
+      "type": "boolean"
+     },
+     "replicas": {
+      "description": "Number of desired pods.",
+      "format": "int32",
+      "type": "integer"
+     },
+     "selector": {
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector"
+       }
+      ],
+      "description": "Label selector for pods."
+     },
+     "strategy": {
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/io.k8s.api.apps.v1.DeploymentStrategy"
+       }
+      ],
+      "default": {},
+      "description": "The deployment strategy to use to replace existing pods with new ones.",
+      "x-kubernetes-patch-strategy": "retainKeys"
+     },
+     "template": {
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/io.k8s.api.core.v1.PodTemplateSpec"
+       }
+      ],
+      "default": {},
+      "description": "Template describes the pods that will be created."
+     }
+    },
+    "required": [
+     "selector",
+     "template"
+    ],
+    "type": "object"
+   },
+   "io.k8s.api.apps.v1.DeploymentStatus": {
+    "description": "DeploymentStatus is the most recently observed status of the Deployment.",
+    "properties": {
+     "readyReplicas": {
+      "description": "Total number of non-terminating pods targeted by this Deployment with a Ready Condition.",
+      "format": "int32",
+      "type": "integer"
+     },
+     "replicas": {
+      "description": "Total number of non-terminating pods targeted by this deployment (their labels match the selector).",
+      "format": "int32",
+      "type": "integer"
+     }
+    },
+    "type": "object"
+   },
+   "io.k8s.api.apps.v1.DeploymentStrategy": {
+    "description": "DeploymentStrategy describes how to replace existing pods with new ones.",
+    "properties": {
+     "rollingUpdate": {
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/io.k8s.api.apps.v1.RollingUpdateDeployment"
+       }
+      ],
+      "description": "Rolling update config params."
+     },
+     "type": {
+      "description": "Type of deployment.",
+      "enum": [
+       "Recreate",
+       "RollingUpdate"
+      ],
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "io.k8s.api.apps.v1.RollingUpdateDeployment": {
+    "description": "Spec to control the desired behavior of rolling update.",
+    "properties": {
+     "maxSurge": {
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.util.intstr.IntOrString"
+       }
+      ],
+      "description": "The maximum number of pods that can be scheduled above the desired number of pods."
+     },
+     "maxUnavailable": {
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.util.intstr.IntOrString"
+       }
+      ],
+      "description": "The maximum number of pods that can be unavailable during the update."
+     }
+    },
+    "type": "object"
+   },
+   "io.k8s.api.core.v1.Container": {
+    "description": "A single application container that you want to run within a pod.",
+    "properties": {
+     "image": {
+      "description": "Container image name.",
+      "type": "string"
+     },
+     "imagePullPolicy": {
+      "description": "Image pull policy.",
+      "enum": [
+       "Always",
+       "IfNotPresent",
+       "Never"
+      ],
+      "type": "string"
+     },
+     "name": {
+      "default": "",
+      "description": "Name of the container specified as a DNS_LABEL.",
+      "type": "string"
+     },
+     "ports": {
+      "description": "List of ports to expose from the container.",
+      "items": {
+       "$ref": "#/components/schemas/io.k8s.api.core.v1.ContainerPort"
+      },
+      "type": "array",
+      "x-kubernetes-list-map-keys": [
+       "containerPort",
+       "protocol"
+      ],
+      "x-kubernetes-list-type": "map",
+      "x-kubernetes-patch-merge-key": "containerPort",
+      "x-kubernetes-patch-strategy": "merge"
+     }
+    },
+    "required": [
+     "name"
+    ],
+    "type": "object"
+   },
+   "io.k8s.api.core.v1.ContainerPort": {
+    "description": "ContainerPort represents a network port in a single container.",
+    "properties": {
+     "containerPort": {
+      "default": 0,
+      "description": "Number of port to expose on the pod's IP address.",
+      "format": "int32",
+      "type": "integer"
+     },
+     "name": {
+      "description": "If specified, this must be an IANA_SVC_NAME and unique within the pod.",
+      "type": "string"
+     },
+     "protocol": {
+      "default": "TCP",
+      "description": "Protocol for port.",
+      "enum": [
+       "SCTP",
+       "TCP",
+       "UDP"
+      ],
+      "type": "string"
+     }
+    },
+    "required": [
+     "containerPort"
+    ],
+    "type": "object"
+   },
+   "io.k8s.api.core.v1.PodSpec": {
+    "description": "PodSpec is a description of a pod.",
+    "properties": {
+     "containers": {
+      "description": "List of containers belonging to the pod.",
+      "items": {
+       "$ref": "#/components/schemas/io.k8s.api.core.v1.Container"
+      },
+      "type": "array",
+      "x-kubernetes-list-map-keys": [
+       "name"
+      ],
+      "x-kubernetes-list-type": "map",
+      "x-kubernetes-patch-merge-key": "name",
+      "x-kubernetes-patch-strategy": "merge"
+     },
+     "restartPolicy": {
+      "description": "Restart policy for all containers within the pod.",
+      "enum": [
+       "Always",
+       "Never",
+       "OnFailure"
+      ],
+      "type": "string"
+     }
+    },
+    "required": [
+     "containers"
+    ],
+    "type": "object"
+   },
+   "io.k8s.api.core.v1.PodTemplateSpec": {
+    "description": "PodTemplateSpec describes the data a pod should have when created from a template.",
+    "properties": {
+     "metadata": {
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta"
+       }
+      ],
+      "default": {},
+      "description": "Standard object's metadata."
+     },
+     "spec": {
+      "allOf": [
+       {
+        "$ref": "#/components/schemas/io.k8s.api.core.v1.PodSpec"
+       }
+      ],
+      "default": {},
+      "description": "Specification of the desired behavior of the pod."
+     }
+    },
+    "type": "object"
+   },
+   "io.k8s.apimachinery.pkg.apis.meta.v1.DeleteOptions": {
+    "description": "DeleteOptions may be provided when deleting an API object.",
+    "properties": {
+     "propagationPolicy": {
+      "description": "Whether and how garbage collection will be performed.",
+      "type": "string"
+     }
+    },
+    "type": "object",
+    "x-kubernetes-group-version-kind": [
+     {
+      "group": "",
+      "kind": "DeleteOptions",
+      "version": "v1"
+     },
+     {
+      "group": "apps",
+      "kind": "DeleteOptions",
+      "version": "v1"
+     }
+    ]
+   },
+   "io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector": {
+    "description": "A label selector is a label query over a set of resources.",
+    "properties": {
+     "matchLabels": {
+      "additionalProperties": {
+       "type": "string"
+      },
+      "description": "matchLabels is a map of {key,value} pairs.",
+      "type": "object"
+     }
+    },
+    "type": "object",
+    "x-kubernetes-map-type": "atomic"
+   },
+   "io.k8s.apimachinery.pkg.apis.meta.v1.ManagedFieldsEntry": {
+    "description": "ManagedFieldsEntry is a workflow-id, a FieldSet and the group version of the resource that the fieldset applies to.",
+    "properties": {
+     "manager": {
+      "description": "Manager is an identifier of the workflow managing these fields.",
+      "type": "string"
+     },
+     "operation": {
+      "description": "Operation is the type of operation which lead to this ManagedFieldsEntry being created.",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta": {
+    "description": "ObjectMeta is metadata that all persisted resources must have, which includes all objects users must create.",
+    "properties": {
+     "annotations": {
+      "additionalProperties": {
+       "type": "string"
+      },
+      "description": "Annotations is an unstructured key value map stored with a resource that may be set by external tools to store and retrieve arbitrary metadata.",
+      "type": "object"
+     },
+     "labels": {
+      "additionalProperties": {
+       "type": "string"
+      },
+      "description": "Map of string keys and values that can be used to organize and categorize (scope and select) objects.",
+      "type": "object"
+     },
+     "managedFields": {
+      "description": "ManagedFields maps workflow-id and version to the set of fields that are managed by that workflow.",
+      "items": {
+       "$ref": "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.ManagedFieldsEntry"
+      },
+      "type": "array",
+      "x-kubernetes-list-type": "atomic"
+     },
+     "name": {
+      "description": "Name must be unique within a namespace.",
+      "type": "string"
+     },
+     "namespace": {
+      "description": "Namespace defines the space within which each name must be unique.",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "io.k8s.apimachinery.pkg.util.intstr.IntOrString": {
+    "description": "IntOrString is a type that can hold an int32 or a string.",
+    "format": "int-or-string",
+    "oneOf": [
+     {
+      "type": "integer"
+     },
+     {
+      "type": "string"
+     }
+    ]
+   }
+  }
+ },
+ "info": {
+  "title": "Kubernetes (trimmed test fixture)",
+  "version": "v1.37.0"
+ },
+ "openapi": "3.0.0",
+ "paths": {}
+}
