@@ -81,6 +81,36 @@ describe("PortForward UI and Store (Task R-09)", () => {
     expect(calls.some((c) => c.cmd === "list_port_forwards")).toBe(true);
   });
 
+  it("05-05: Clicking Open in browser button in PortForwardBar calls open_in_browser with browserUrl", async () => {
+    const calls: IpcCall[] = [];
+    mockIPC((cmd, args) => {
+      calls.push({ cmd, args });
+      if (cmd === "list_port_forwards") {
+        return [SAMPLE_FORWARD];
+      }
+      if (cmd === "open_in_browser") {
+        return null;
+      }
+      return undefined;
+    });
+
+    render(<StatusBar />);
+
+    const openButton = await screen.findByRole("button", {
+      name: "Open in browser http://127.0.0.1:8080",
+    });
+    expect(openButton).toBeInTheDocument();
+    await userEvent.click(openButton);
+
+    expect(
+      calls.some(
+        (c) =>
+          c.cmd === "open_in_browser" &&
+          (c.args as { url?: string }).url === "http://127.0.0.1:8080",
+      ),
+    ).toBe(true);
+  });
+
   it("Clicking the Stop button in PortForwardBar calls stop_port_forward with forward ID and removes the item from the bar", async () => {
     const calls: IpcCall[] = [];
     mockIPC((cmd, args) => {

@@ -43,12 +43,13 @@ import { useContextsStore } from "../stores/contexts";
 import type { Cell, Row } from "../stores/pods";
 import { useResourceDetailStore } from "../stores/resourceDetail";
 import { formatAge } from "./age";
+import { ActivePortForwards } from "./ActivePortForwards";
 import { DebugContainerModal } from "./DebugContainerModal";
 import { DiffModal } from "./DiffModal";
 import { extractPodContainers, type ExecClient } from "./execTerminal";
 import { ICON_SIZE, ICON_STROKE, KindIcon } from "./KindIcon";
 import { NodeDebugModal } from "./NodeDebugModal";
-import { ExecShellPanel } from "./OpsPanels";
+import { CopyUrlButton, ExecShellPanel, OpenInBrowserButton } from "./OpsPanels";
 import { PodSummary } from "./PodSummary";
 import { PortForwardForm } from "./PortForwardForm";
 import { parseRbacFromYaml } from "./rbacSummary";
@@ -94,6 +95,7 @@ export interface ResourceDrawerProps {
    * the port-forward forms (Android 0.3 ships neither, docs/TASKS.md).
    */
   remoteOps?: boolean;
+  onOpenInBrowser?: ((url: string) => void | Promise<void>) | undefined;
 }
 
 const DEFAULT_TABS: readonly DrawerTab[] = ["Summary", "YAML", "Logs", "Events"];
@@ -299,6 +301,7 @@ export function ResourceDrawer({
   onOpenRelated: onOpenRelatedProp,
   variant = "drawer",
   remoteOps = true,
+  onOpenInBrowser,
 }: ResourceDrawerProps) {
   const screen = variant === "screen";
   const asideRef = useRef<HTMLElement | null>(null);
@@ -435,6 +438,8 @@ export function ResourceDrawer({
     }
     return list;
   }, [row, detail, currentYaml]);
+
+  const endpoints = detail?.endpoints ?? [];
 
   if (!row) {
     return null;
@@ -1030,6 +1035,7 @@ export function ResourceDrawer({
               onSelectTab={handleSelectTab}
               portForwardContainer={pfContainer}
               remoteOps={remoteOps}
+              onOpenInBrowser={onOpenInBrowser}
               onPortForward={(containerName) => {
                 setSelectedContainer(containerName);
                 setPfContainer((prev) => (prev === containerName ? null : containerName));
@@ -1065,6 +1071,43 @@ export function ResourceDrawer({
                   )}
                 </div>
               </div>
+              {endpoints.length > 0 && (
+                <div className="card" data-testid="summary-endpoints-card">
+                  <h4>
+                    ENDPOINTS
+                    <span className="r">
+                      {detail?.endpointsTruncated ? `first ${String(endpoints.length)}` : endpoints.length}
+                    </span>
+                  </h4>
+                  <div className="body endpoints-card__list">
+                    {endpoints.map((ep, idx) => (
+                      <div
+                        key={ep.url}
+                        className="endpoints-card__item"
+                        data-testid={`endpoint-item-${String(idx)}`}
+                        title={ep.source}
+                      >
+                        <code className="endpoints-card__url">{ep.url}</code>
+                        <div className="endpoints-card__actions">
+                          {ep.openable ? (
+                            <>
+                              <OpenInBrowserButton url={ep.url} onOpen={onOpenInBrowser} />
+                              <CopyUrlButton url={ep.url} showUrl={false} />
+                            </>
+                          ) : (
+                            <span
+                              className="resource-drawer__empty"
+                              data-testid={`endpoint-not-openable-${String(idx)}`}
+                            >
+                              Wildcard or non-hostname: cannot open
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               {detail?.certificates && detail.certificates.length > 0 && (
                 <div className="card" data-testid="summary-certificates-card">
                   <h4>
@@ -1232,6 +1275,12 @@ export function ResourceDrawer({
                 <div className="card" data-testid="summary-port-forward-card">
                   <h4>PORT-FORWARD</h4>
                   <div className="body">
+                    <ActivePortForwards
+                      context={row.cluster}
+                      namespace={row.namespace}
+                      pod={row.name}
+                      onOpenInBrowser={onOpenInBrowser}
+                    />
                     <PortForwardForm
                       context={row.cluster}
                       namespace={row.namespace}

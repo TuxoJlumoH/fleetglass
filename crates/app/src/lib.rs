@@ -1359,6 +1359,130 @@ async fn open_external_terminal(
     open_external_terminal_impl(&state, request).await
 }
 
+/// Launches the native OS browser for `url` using the platform opener (`xdg-open`, `open`, `rundll32.exe`).
+fn launch_system_browser(url: &str) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    let mut cmd = std::process::Command::new("open");
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("rundll32.exe");
+        c.arg("url.dll,FileProtocolHandler");
+        c
+    };
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let mut cmd = std::process::Command::new("xdg-open");
+
+    // `url` is a validated http(s) serialisation; refuse anything the opener could read as an option.
+    if url.starts_with('-') {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "refusing to pass an option-like argument to the browser opener",
+        ));
+    }
+    cmd.arg(url);
+    cmd.spawn().map(|_| ())
+}
+
+/// Who an `open_in_browser` audit entry is attributed to.
+struct BrowserAuditSubject {
+    kind: &'static str,
+    cluster: String,
+    user: Option<String>,
+    namespace: Option<String>,
+    name: String,
+}
+
+impl BrowserAuditSubject {
+    fn browser(name: String) -> Self {
+        Self {
+            kind: "Browser",
+            cluster: "local".to_owned(),
+            user: None,
+            namespace: None,
+            name,
+        }
+    }
+
+    fn record(self, state: &AppState, target: &str, error: Option<String>) {
+        state.audit.append_or_warn(&AuditEntry {
+            id: 0,
+            timestamp: fleetglass_core::audit::now_rfc3339(),
+            cluster: self.cluster,
+            user: self.user,
+            action: "open_in_browser".to_owned(),
+            kind: self.kind.to_owned(),
+            namespace: self.namespace,
+            name: self.name,
+            kubectl: format!("# open in browser {target}"),
+            success: error.is_none(),
+            error,
+        });
+    }
+}
+
+/// Helper for `open_in_browser` parameterised over the process launcher for testability (`05-05`).
+///
+/// Every call writes one audit entry. The URL is validated before anything is
+/// formatted into the entry; rejected input is stored truncated.
+async fn open_in_browser_with_launcher<F>(
+    state: &AppState,
+    url: &str,
+    launcher: F,
+) -> Result<(), IpcError>
+where
+    F: FnOnce(&str) -> std::io::Result<()>,
+{
+    use fleetglass_core::browser::{audit_safe_input, same_endpoint, validate_browser_url};
+
+    let parsed = match validate_browser_url(url) {
+        Ok(parsed) => parsed,
+        Err(err) => {
+            let shown = audit_safe_input(url);
+            BrowserAuditSubject::browser(shown.clone()).record(
+                state,
+                &shown,
+                Some(err.to_string()),
+            );
+            return Err(IpcError::from(&err));
+        }
+    };
+    let target = parsed.as_str();
+
+    let forward = state.port_forwards.list().into_iter().find(|pf| {
+        validate_browser_url(&pf.browser_url).is_ok_and(|pf_url| same_endpoint(&pf_url, &parsed))
+    });
+    let subject = match forward {
+        Some(pf) => BrowserAuditSubject {
+            kind: "PortForward",
+            user: state.manager.source().context_user(&pf.context),
+            cluster: pf.context,
+            namespace: Some(pf.namespace),
+            name: pf.pod,
+        },
+        None => BrowserAuditSubject::browser(target.to_owned()),
+    };
+
+    let result = launcher(target);
+    subject.record(
+        state,
+        target,
+        result.as_ref().err().map(ToString::to_string),
+    );
+    result.map_err(|err| IpcError::internal(format!("failed to open browser: {err}")))
+}
+
+/// Implementation of `open_in_browser`.
+async fn open_in_browser_impl(state: &AppState, url: &str) -> Result<(), IpcError> {
+    open_in_browser_with_launcher(state, url, launch_system_browser).await
+}
+
+/// Spawns the system browser for a validated local port-forward or Ingress/Gateway URL (`05-05`).
+#[tauri::command]
+#[specta::specta]
+async fn open_in_browser(state: tauri::State<'_, AppState>, url: String) -> Result<(), IpcError> {
+    open_in_browser_impl(&state, &url).await
+}
+
 /// Runs structured kubeconfig and auth diagnostics for `context`.
 #[tauri::command]
 #[specta::specta]
@@ -3013,6 +3137,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
         relock_context,
         detect_terminal_emulators,
         open_external_terminal,
+        open_in_browser,
         run_connection_diagnostics,
         reconnect_context,
         debug_pod,
@@ -5013,6 +5138,113 @@ https://fgplugin.localhost/sample-pod-counter/;"
             assert!(!page.entries[0].success);
             assert!(page.entries[0].error.is_some());
 
+            let _ = std::fs::remove_dir_all(&dir);
+        });
+    }
+
+    #[test]
+    fn test_open_in_browser_guards_and_audit() {
+        tauri::async_runtime::block_on(async {
+            let dir = std::env::temp_dir().join(format!("fg-browser-test-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let settings = Arc::new(SettingsStore::new(dir.join("context-settings.json")));
+            let audit = Arc::new(AuditLogStore::new(dir.join("audit.jsonl")));
+            let manager = Arc::new(ClusterManager::new(
+                KubeconfigSource::from_paths(Vec::new()),
+            ));
+            let state = AppState::with_parts_and_audit(manager, settings, audit.clone());
+            let latest = || audit.query(0, 1, None, None).unwrap().entries[0].clone();
+            let count = || audit.query(0, 100, None, None).unwrap().entries.len();
+
+            // 1. Invalid URL: rejected without launching, audited with truncated input.
+            let long_bad = format!("javascript:alert(1)//{}", "x".repeat(5000));
+            let mut launched = false;
+            let err = open_in_browser_with_launcher(&state, &long_bad, |_| {
+                launched = true;
+                Ok(())
+            })
+            .await
+            .unwrap_err();
+            assert!(!launched);
+            assert_eq!(err.kind, ErrorKind::InvalidInput);
+            assert_eq!(count(), 1);
+            let rejected = latest();
+            assert_eq!(rejected.action, "open_in_browser");
+            assert_eq!(rejected.kind, "Browser");
+            assert!(!rejected.success);
+            assert!(rejected.error.is_some());
+            assert!(rejected.name.chars().count() <= 201);
+            assert!(rejected.kubectl.len() < 400);
+
+            let err = open_in_browser_impl(&state, "http://0.0.0.0:8080")
+                .await
+                .unwrap_err();
+            assert_eq!(err.kind, ErrorKind::InvalidInput);
+            assert_eq!(count(), 2);
+
+            // 2. An active port-forward (ephemeral port) is attributed, also with a trailing `/`.
+            let pf = state
+                .port_forwards
+                .start_local(
+                    "stage-cluster".to_owned(),
+                    "default".to_owned(),
+                    "nginx-pod".to_owned(),
+                    80,
+                    0,
+                    None,
+                )
+                .await
+                .unwrap();
+            for url in [pf.browser_url.clone(), format!("{}/", pf.browser_url)] {
+                let mut launched_url = String::new();
+                open_in_browser_with_launcher(&state, &url, |u| {
+                    launched_url = u.to_owned();
+                    Ok(())
+                })
+                .await
+                .unwrap();
+                assert_eq!(launched_url, format!("{}/", pf.browser_url));
+                let entry = latest();
+                assert_eq!(entry.cluster, "stage-cluster");
+                assert_eq!(entry.namespace.as_deref(), Some("default"));
+                assert_eq!(entry.name, "nginx-pod");
+                assert_eq!(entry.kind, "PortForward");
+                assert!(entry.success);
+            }
+            assert_eq!(count(), 4);
+
+            // 3. Ingress hostname with a query string: normalised URL goes to the launcher.
+            let mut launched_url = String::new();
+            open_in_browser_with_launcher(&state, "https://App.Example.com/a?x=1&y=2", |u| {
+                launched_url = u.to_owned();
+                Ok(())
+            })
+            .await
+            .unwrap();
+            assert_eq!(launched_url, "https://app.example.com/a?x=1&y=2");
+            let entry = latest();
+            assert_eq!(entry.kind, "Browser");
+            assert_eq!(entry.name, "https://app.example.com/a?x=1&y=2");
+            assert!(entry.success);
+
+            // 4. Launcher failure is returned and audited.
+            let err = open_in_browser_with_launcher(&state, &pf.browser_url, |_| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "opener not found",
+                ))
+            })
+            .await
+            .unwrap_err();
+            assert_eq!(err.kind, ErrorKind::Internal);
+            let entry = latest();
+            assert_eq!(entry.kind, "PortForward");
+            assert!(!entry.success);
+            assert_eq!(entry.error.as_deref(), Some("opener not found"));
+            assert_eq!(count(), 6);
+
+            state.port_forwards.stop(pf.id);
             let _ = std::fs::remove_dir_all(&dir);
         });
     }

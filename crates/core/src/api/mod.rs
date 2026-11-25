@@ -867,6 +867,24 @@ pub struct ResourceDetail {
     pub pod: Option<PodSummary>,
     #[serde(default)]
     pub certificates: Vec<CertificateInfo>,
+    /// Browser endpoints of an Ingress, Gateway or HTTPRoute, capped at 50 (`05-05`).
+    #[serde(default)]
+    pub endpoints: Vec<ResourceEndpoint>,
+    #[serde(default)]
+    pub endpoints_truncated: bool,
+}
+
+/// A URL derived from an Ingress / Gateway / HTTPRoute spec (`05-05`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceEndpoint {
+    /// Normalised URL, or a display pattern such as `https://*.example.com/` when not openable.
+    pub url: String,
+    /// True when `url` passes the browser launcher's validation.
+    pub openable: bool,
+    /// Where the endpoint came from, e.g. `rule app.example.com` or `listener web`.
+    pub source: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

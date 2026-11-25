@@ -136,6 +136,10 @@ pub enum Error {
         name: String,
         message: String,
     },
+
+    /// A URL requested to open in a browser is invalid, disallowed, or unsafe.
+    #[error("invalid browser URL: {reason}")]
+    InvalidBrowserUrl { reason: String },
 }
 
 fn location_suffix(line: Option<u64>, column: Option<u64>) -> String {

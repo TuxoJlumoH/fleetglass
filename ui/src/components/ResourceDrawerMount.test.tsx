@@ -7,6 +7,7 @@ import type { ResourceDetail } from "../generated/bindings";
 import { initialContextsState, useContextsStore } from "../stores/contexts";
 import { useLayoutStore } from "../stores/layout";
 import { resetPodsStore, type Row } from "../stores/pods";
+import { usePortForwardsStore } from "../stores/portForwards";
 import { resetResourceDetailStore, useResourceDetailStore } from "../stores/resourceDetail";
 import { DiagnosticsModal } from "./DiagnosticsModal";
 import { PodTable } from "./PodTable";
@@ -971,5 +972,299 @@ rules:
     expect(screen.getByText("example.com")).toBeInTheDocument();
     expect(screen.getByText("api.example.com")).toBeInTheDocument();
     expect(screen.getByText("10.0.0.1")).toBeInTheDocument();
+  });
+
+  it("05-05: renders ENDPOINTS card for Ingress with Open in Browser button", async () => {
+    const user = userEvent.setup();
+    const onOpen = vi.fn();
+
+    const ingressRow: Row = {
+      uid: "uid-ingress-1",
+      cluster: "kind-dev",
+      kind: "Ingress",
+      namespace: "default",
+      name: "web-ingress",
+      status: "healthy",
+      statusReason: "Active",
+      cells: [
+        { type: "text", value: "nginx" },
+        { type: "status", value: { label: "Active", phase: "healthy" } },
+        { type: "timestamp", value: "2026-03-30T00:00:00Z" },
+      ],
+      labels: [],
+      custom: [],
+    };
+
+    const ingressDetail: ResourceDetail = {
+      uid: "uid-ingress-1",
+      cluster: "kind-dev",
+      kind: "Ingress",
+      namespace: "default",
+      name: "web-ingress",
+      yaml: `apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web-ingress
+  namespace: default
+spec:
+  rules:
+  - host: app.example.com
+    http:
+      paths:
+      - path: /dashboard
+`,
+      related: [],
+      events: [],
+      eventsTruncated: false,
+      pod: null,
+      certificates: [],
+      endpoints: [
+        { url: "http://app.example.com/dashboard", openable: true, source: "rule app.example.com" },
+        { url: "http://*.example.com/", openable: false, source: "rule *.example.com" },
+      ],
+      endpointsTruncated: false,
+    };
+
+    render(
+      <ResourceDrawer
+        row={ingressRow}
+        detail={ingressDetail}
+        onClose={vi.fn()}
+        onOpenInBrowser={onOpen}
+      />,
+    );
+
+    expect(await screen.findByTestId("summary-endpoints-card")).toBeInTheDocument();
+    expect(screen.getByTestId("endpoint-item-0")).toBeInTheDocument();
+    expect(screen.getByText("http://app.example.com/dashboard")).toBeInTheDocument();
+
+    const openBtn = screen.getByRole("button", {
+      name: "Open in browser http://app.example.com/dashboard",
+    });
+    expect(openBtn).toBeInTheDocument();
+    await user.click(openBtn);
+    expect(onOpen).toHaveBeenCalledWith("http://app.example.com/dashboard");
+
+    // Wildcard hosts are listed but cannot be opened.
+    expect(screen.getByText("http://*.example.com/")).toBeInTheDocument();
+    expect(screen.getByTestId("endpoint-not-openable-1")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Open in browser http://*.example.com/" }),
+    ).toBeNull();
+  });
+
+  it("05-05: does not derive endpoints from YAML when the backend sends none", () => {
+    const ingressRow: Row = {
+      ...sampleRow,
+      uid: "uid-ingress-2",
+      kind: "Ingress",
+      name: "yaml-only",
+    };
+    render(
+      <ResourceDrawer
+        row={ingressRow}
+        detail={{
+          ...sampleDetail,
+          kind: "Ingress",
+          name: "yaml-only",
+          yaml: "kind: Ingress\nspec:\n  rules:\n  - host: app.example.com\n",
+          pod: null,
+          endpoints: [],
+          endpointsTruncated: false,
+        }}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("summary-endpoints-card")).toBeNull();
+  });
+
+  it("05-05: says the endpoint list is capped when endpointsTruncated is set", () => {
+    const routeRow: Row = { ...sampleRow, uid: "uid-route", kind: "HTTPRoute", name: "r" };
+    render(
+      <ResourceDrawer
+        row={routeRow}
+        detail={{
+          ...sampleDetail,
+          kind: "HTTPRoute",
+          name: "r",
+          pod: null,
+          endpoints: [{ url: "http://a.example.com/", openable: true, source: "hostname a" }],
+          endpointsTruncated: true,
+        }}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("summary-endpoints-card")).toHaveTextContent("first 1");
+  });
+
+  it("05-05: renders ENDPOINTS card for Gateway with validated endpoints", async () => {
+    const gatewayRow: Row = {
+      uid: "uid-gw-1",
+      cluster: "kind-dev",
+      kind: "Gateway",
+      namespace: "gateway-system",
+      name: "prod-gateway",
+      status: "healthy",
+      statusReason: "Programmed",
+      cells: [
+        { type: "status", value: { label: "Programmed", phase: "healthy" } },
+        { type: "text", value: "10.0.0.1" },
+        { type: "timestamp", value: "2026-03-30T00:00:00Z" },
+      ],
+      labels: [],
+      custom: [],
+    };
+
+    const gatewayDetail: ResourceDetail = {
+      uid: "uid-gw-1",
+      cluster: "kind-dev",
+      kind: "Gateway",
+      namespace: "gateway-system",
+      name: "prod-gateway",
+      yaml: `apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: prod-gateway
+spec:
+  listeners:
+  - name: web
+    port: 8080
+    protocol: HTTP
+    hostname: api.example.com
+`,
+      related: [],
+      events: [],
+      eventsTruncated: false,
+      pod: null,
+      certificates: [],
+      endpoints: [
+        { url: "http://api.example.com:8080/", openable: true, source: "listener web" },
+      ],
+      endpointsTruncated: false,
+    };
+
+    render(
+      <ResourceDrawer
+        row={gatewayRow}
+        detail={gatewayDetail}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByTestId("summary-endpoints-card")).toBeInTheDocument();
+    expect(screen.getByTestId("endpoint-item-0")).toBeInTheDocument();
+    expect(screen.getByText("http://api.example.com:8080/")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Open in browser http://api.example.com:8080/" }),
+    ).toBeInTheDocument();
+  });
+
+  it("05-05: renders active port forwards with Open in browser button in pod port-forward card", async () => {
+    const user = userEvent.setup();
+    const onOpen = vi.fn();
+
+    const podRow: Row = {
+      uid: "uid-pod-1",
+      cluster: "kind-dev",
+      kind: "Pod",
+      namespace: "default",
+      name: "web-pod",
+      status: "healthy",
+      statusReason: "Running",
+      cells: [
+        { type: "text", value: "1/1" },
+        { type: "status", value: { label: "Running", phase: "healthy" } },
+        { type: "timestamp", value: "2026-03-30T00:00:00Z" },
+      ],
+      labels: [],
+      custom: [],
+    };
+
+    const podDetail: ResourceDetail = {
+      uid: "uid-pod-1",
+      cluster: "kind-dev",
+      kind: "Pod",
+      namespace: "default",
+      name: "web-pod",
+      yaml: `apiVersion: v1
+kind: Pod
+metadata:
+  name: web-pod
+  namespace: default
+spec:
+  containers:
+  - name: web
+    ports:
+    - containerPort: 80
+`,
+      related: [],
+      events: [],
+      eventsTruncated: false,
+      pod: {
+        node: "fleetglass-dev-worker",
+        podIp: "10.244.1.7",
+        qosClass: "BestEffort",
+        serviceAccount: "default",
+        priorityClass: null,
+        conditions: [{ type: "Ready", status: "True" }],
+        tolerations: [],
+        containers: [
+          {
+            name: "web",
+            image: "nginx:1.27",
+            init: false,
+            state: "Running",
+            ready: true,
+            restarts: 0,
+            ports: [{ containerPort: 80, protocol: "TCP", name: "http" }],
+            requests: { cpu: "100m", memory: "64Mi" },
+            limits: { memory: "128Mi" },
+          },
+        ],
+        uses: [],
+      },
+      certificates: [],
+      endpoints: [],
+      endpointsTruncated: false,
+    };
+
+    usePortForwardsStore.setState({
+      forwards: [
+        {
+          id: 99,
+          context: "kind-dev",
+          namespace: "default",
+          pod: "web-pod",
+          remotePort: 80,
+          localPort: 9090,
+          browserUrl: "http://127.0.0.1:9090",
+          activeConnections: 0,
+          totalConnections: 0,
+        },
+      ],
+    });
+
+    render(
+      <ResourceDrawer
+        row={podRow}
+        detail={podDetail}
+        onClose={vi.fn()}
+        onOpenInBrowser={onOpen}
+      />,
+    );
+
+    // The real Pod path renders PodSummary, which must carry the active forwards.
+    expect(await screen.findByTestId("pod-summary")).toBeInTheDocument();
+    expect(screen.getByTestId("pod-active-forwards-card")).toBeInTheDocument();
+    expect(screen.getByTestId("active-pod-forwards")).toBeInTheDocument();
+    expect(screen.getByTestId("active-pf-99")).toBeInTheDocument();
+    expect(screen.getByText("9090→80")).toBeInTheDocument();
+
+    const openBtn = screen.getByRole("button", {
+      name: "Open in browser http://127.0.0.1:9090",
+    });
+    expect(openBtn).toBeInTheDocument();
+    await user.click(openBtn);
+    expect(onOpen).toHaveBeenCalledWith("http://127.0.0.1:9090");
   });
 });

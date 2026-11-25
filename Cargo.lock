@@ -1135,6 +1135,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+ "url",
  "x509-parser",
 ]
 

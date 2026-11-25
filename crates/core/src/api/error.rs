@@ -92,7 +92,8 @@ impl From<&Error> for IpcError {
             Error::InvalidRegex { .. }
             | Error::InvalidBase64 { .. }
             | Error::InvalidColumnPath { .. }
-            | Error::InvalidDebugRequest { .. } => ErrorKind::InvalidInput,
+            | Error::InvalidDebugRequest { .. }
+            | Error::InvalidBrowserUrl { .. } => ErrorKind::InvalidInput,
             Error::PathTraversal { .. } | Error::SizeLimitExceeded { .. } => {
                 ErrorKind::InvalidInput
             }

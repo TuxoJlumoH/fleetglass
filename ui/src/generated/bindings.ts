@@ -74,6 +74,8 @@ export const commands = {
 	detectTerminalEmulators: () => typedError<TerminalEmulatorInfo[], IpcError>(__TAURI_INVOKE("detect_terminal_emulators")),
 	/**  Spawns an external terminal emulator running Pod exec, Node debug, or context shell (`04-10`). */
 	openExternalTerminal: (request: ExternalTerminalRequest_Deserialize) => typedError<null, IpcError>(__TAURI_INVOKE("open_external_terminal", { request })),
+	/**  Spawns the system browser for a validated local port-forward or Ingress/Gateway URL (`05-05`). */
+	openInBrowser: (url: string) => typedError<null, IpcError>(__TAURI_INVOKE("open_in_browser", { url })),
 	/**  Runs structured kubeconfig and auth diagnostics for `context`. */
 	runConnectionDiagnostics: (context: string) => typedError<DiagnosticReport_Serialize, IpcError>(__TAURI_INVOKE("run_connection_diagnostics", { context })),
 	/**  Invalidates any cached client and triggers all stores for `context` to re-authenticate and re-list (04-02). */
@@ -1637,6 +1639,9 @@ export type ResourceDetail_Deserialize = {
 	eventsTruncated?: boolean,
 	pod?: PodSummary_Deserialize | null,
 	certificates?: CertificateInfo[],
+	/**  Browser endpoints of an Ingress, Gateway or HTTPRoute, capped at 50 (`05-05`). */
+	endpoints?: ResourceEndpoint[],
+	endpointsTruncated?: boolean,
 };
 
 /**  Full resource detail and cleaned YAML representation for the detail drawer. */
@@ -1652,6 +1657,19 @@ export type ResourceDetail_Serialize = {
 	eventsTruncated: boolean,
 	pod: PodSummary_Serialize | null,
 	certificates: CertificateInfo[],
+	/**  Browser endpoints of an Ingress, Gateway or HTTPRoute, capped at 50 (`05-05`). */
+	endpoints: ResourceEndpoint[],
+	endpointsTruncated: boolean,
+};
+
+/**  A URL derived from an Ingress / Gateway / HTTPRoute spec (`05-05`). */
+export type ResourceEndpoint = {
+	/**  Normalised URL, or a display pattern such as `https://*.example.com/` when not openable. */
+	url: string,
+	/**  True when `url` passes the browser launcher's validation. */
+	openable: boolean,
+	/**  Where the endpoint came from, e.g. `rule app.example.com` or `listener web`. */
+	source: string,
 };
 
 export type ResourcePair = ResourcePair_Serialize | ResourcePair_Deserialize;

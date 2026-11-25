@@ -2836,6 +2836,22 @@ button.pf-bar__link {
   font-family: var(--font-ui);
 }
 
+.pf-bar__open-btn {
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-elev);
+  color: var(--accent);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.pf-bar__open-btn:hover {
+  background: var(--bg-hover);
+  text-decoration: underline;
+}
+
 .pf-bar__stop-btn {
   padding: 1px 6px;
   border: 1px solid var(--border);
@@ -6752,3 +6768,55 @@ button.overview-row:focus-visible {
 .m-view .import-view {
   max-width: none;
 }
+
+/* Resource drawer Endpoints card (05-05) */
+.endpoints-card__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.endpoints-card__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.endpoints-card__url {
+  color: var(--fg);
+  user-select: all;
+  word-break: break-all;
+}
+
+.endpoints-card__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.resource-drawer__active-pfs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.resource-drawer__active-pf-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 12px;
+}
+
