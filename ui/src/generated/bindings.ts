@@ -130,6 +130,8 @@ export const commands = {
 	deleteNodeDebugPod: (context: string, namespace: string, podName: string) => typedError<null, IpcError>(__TAURI_INVOKE("delete_node_debug_pod", { context, namespace, podName })),
 	/**  Sends stdin data to an active container exec session (`R-10`). */
 	writeExecStdin: (id: number, data: string) => typedError<null, IpcError>(__TAURI_INVOKE("write_exec_stdin", { id, data })),
+	/**  Resizes an active container exec/attach/node-debug session's remote PTY dimensions (`05-02`). */
+	resizeExecSession: (id: number, cols: number, rows: number) => typedError<null, IpcError>(__TAURI_INVOKE("resize_exec_session", { id, cols, rows })),
 	/**  Stops an active container exec session by ID (`R-10`). */
 	stopExecSession: (id: number) => typedError<boolean, IpcError>(__TAURI_INVOKE("stop_exec_session", { id })),
 	/**  Returns all configured cluster groups sorted by name (bounded by user config). */
@@ -906,6 +908,8 @@ export type DebugNodeRequest_Deserialize = {
 	command?: string[],
 	confirmedName?: string | null,
 	namespace?: string | null,
+	cols?: number | null,
+	rows?: number | null,
 };
 
 /**  Request to create a short-lived host-namespace debug shell on a node (`04-03d`). */
@@ -916,6 +920,8 @@ export type DebugNodeRequest_Serialize = {
 	command: string[],
 	confirmedName: string | null,
 	namespace: string | null,
+	cols: number | null,
+	rows: number | null,
 };
 
 /**  Request to add an ephemeral debug container to a pod. */

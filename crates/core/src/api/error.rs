@@ -93,7 +93,8 @@ impl From<&Error> for IpcError {
             | Error::InvalidBase64 { .. }
             | Error::InvalidColumnPath { .. }
             | Error::InvalidDebugRequest { .. }
-            | Error::InvalidBrowserUrl { .. } => ErrorKind::InvalidInput,
+            | Error::InvalidBrowserUrl { .. }
+            | Error::InvalidTerminalSize { .. } => ErrorKind::InvalidInput,
             Error::PathTraversal { .. } | Error::SizeLimitExceeded { .. } => {
                 ErrorKind::InvalidInput
             }

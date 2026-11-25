@@ -5,9 +5,10 @@ import { useContextsStore } from "../stores/contexts";
 import { type Row } from "../stores/pods";
 import {
   getExecClient,
-  stripAnsi,
   type ExecClient,
 } from "./execTerminal";
+import { TerminalEmulator } from "./TerminalEmulator";
+import { TerminalStream } from "./terminalStream";
 
 interface Props {
   open: boolean;
@@ -33,11 +34,10 @@ export function NodeDebugModal({ open, onClose, row, execClient }: Props) {
   const [copied, setCopied] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [sessionId, setSessionId] = useState<number | null>(null);
-  const [terminalOutput, setTerminalOutput] = useState("");
+  const [stream, setStream] = useState<TerminalStream | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const sessionIdRef = useRef<number | null>(null);
-  const terminalRef = useRef<HTMLDivElement | null>(null);
 
   const cached = useContextsStore((s) => s.settingsByContext[row.cluster]);
   const readOnly = cached?.readOnly ?? false;
@@ -47,18 +47,6 @@ export function NodeDebugModal({ open, onClose, row, execClient }: Props) {
   useEffect(() => {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
-
-  useEffect(() => {
-    if (sessionId !== null) {
-      terminalRef.current?.focus();
-    }
-  }, [sessionId]);
-
-  useEffect(() => {
-    if (terminalRef.current) {
-      terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
-    }
-  }, [terminalOutput]);
 
   useEffect(() => {
     return () => {
@@ -118,16 +106,16 @@ export function NodeDebugModal({ open, onClose, row, execClient }: Props) {
     if (readOnly || !nameMatches || connecting || sessionId !== null) return;
     setConnecting(true);
     setError(null);
-    setTerminalOutput("");
+    const out = new TerminalStream();
+    setStream(out);
 
     try {
+      const onChunk = (chunk: string) => {
+        out.write(chunk);
+      };
       const channel = client.createChannel
-        ? client.createChannel((chunk: string) => {
-            setTerminalOutput((prev) => prev + chunk);
-          })
-        : new Channel<string>((chunk: string) => {
-            setTerminalOutput((prev) => prev + chunk);
-          });
+        ? client.createChannel(onChunk)
+        : new Channel<string>(onChunk);
 
       const parsedCommand = command.trim() ? command.trim().split(/\s+/) : [];
       const req = {
@@ -137,6 +125,8 @@ export function NodeDebugModal({ open, onClose, row, execClient }: Props) {
         command: parsedCommand,
         confirmedName: protectedContext ? typedName.trim() : null,
         namespace: namespace.trim() || null,
+        cols: 80,
+        rows: 24,
       };
 
       const res = await (client.startNodeDebugSession ?? commands.startNodeDebugSession)(
@@ -188,48 +178,6 @@ export function NodeDebugModal({ open, onClose, row, execClient }: Props) {
       }
     }
     onClose();
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
-    if (sessionId === null) return;
-    if (e.metaKey || e.altKey) return;
-
-    let dataToSend: string | null = null;
-    if (e.key === "Enter") {
-      dataToSend = "\n";
-    } else if (e.key === "Backspace") {
-      dataToSend = "\x7f";
-    } else if (e.key === "Tab") {
-      dataToSend = "\t";
-    } else if (e.key === "Escape") {
-      dataToSend = "\x1b";
-      e.stopPropagation();
-    } else if (e.ctrlKey) {
-      const lower = e.key.toLowerCase();
-      if (lower === "c") {
-        dataToSend = "\x03";
-      } else if (lower === "d") {
-        dataToSend = "\x04";
-      } else if (lower === "l") {
-        dataToSend = "\x0c";
-      }
-    } else if (e.key.length === 1) {
-      dataToSend = e.key;
-    }
-
-    if (dataToSend !== null) {
-      e.preventDefault();
-      void client.writeExecStdin(sessionId, dataToSend).catch(() => undefined);
-    }
-  };
-
-  const handlePaste = (e: React.ClipboardEvent<HTMLElement>) => {
-    if (sessionId === null) return;
-    const text = e.clipboardData.getData("text");
-    if (text) {
-      e.preventDefault();
-      void client.writeExecStdin(sessionId, text).catch(() => undefined);
-    }
   };
 
   const launchDisabled = connecting || readOnly || !nameMatches || !image.trim();
@@ -406,21 +354,22 @@ export function NodeDebugModal({ open, onClose, row, execClient }: Props) {
                 </button>
               </div>
 
-              <div
-                data-testid="node-debug-terminal"
-                className="exec-panel__terminal node-debug-terminal"
-                tabIndex={0}
-                role="region"
-                aria-label={`Node debug terminal for ${row.name}`}
-                ref={terminalRef}
-                onKeyDown={handleKeyDown}
-                onPaste={handlePaste}
-              >
-                <pre data-testid="node-debug-output" className="exec-panel__output">
-                  {stripAnsi(terminalOutput)}
-                  {sessionId !== null && <span className="exec-panel__cursor" aria-hidden="true" />}
-                </pre>
-              </div>
+              <TerminalEmulator
+                stream={stream}
+                sessionId={sessionId}
+                testId="node-debug-terminal"
+                ariaLabel={`Node debug terminal for ${row.name}`}
+                onStdin={(data) => {
+                  if (sessionId !== null) {
+                    void client.writeExecStdin(sessionId, data).catch(() => undefined);
+                  }
+                }}
+                onResize={(cols, rows) => {
+                  if (sessionId !== null && client.resizeExecSession) {
+                    void client.resizeExecSession(sessionId, cols, rows).catch(() => undefined);
+                  }
+                }}
+              />
             </div>
           )}
         </div>

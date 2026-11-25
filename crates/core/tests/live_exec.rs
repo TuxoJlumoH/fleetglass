@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use fleetglass_core::api::{ContextSettings, ExecSpec};
 use fleetglass_core::cluster::ClusterManager;
 use fleetglass_core::error::Error;
-use fleetglass_core::exec::start_exec_session;
+use fleetglass_core::exec::{TerminalSize, start_exec_session};
 use fleetglass_core::kubeconfig::KubeconfigSource;
 use futures::FutureExt;
 use k8s_openapi::api::core::v1::{Container, Pod, PodSpec};
@@ -214,6 +214,47 @@ async fn live_exec_interactive_shell_and_guards() {
 
         assert!(collected.contains("hi"), "exec output did not contain 'hi'");
         println!("verified interactive exec shell received: {collected:?}");
+
+        // 5. Two-way resize (05-02): the remote PTY must report the new size via `stty size`.
+        // A burst of intermediate sizes coalesces; only the last one has to reach the PTY.
+        for cols in [90, 100, 110] {
+            session
+                .resize(TerminalSize::new(cols, 30).unwrap())
+                .expect("send intermediate terminal size");
+        }
+        session
+            .resize(TerminalSize::new(132, 43).unwrap())
+            .expect("send terminal resize");
+
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut stty = String::new();
+        'probe: loop {
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for 'stty size' to report '43 132'; collected: {stty:?}"
+            );
+            // The resize frame races the command on separate websocket channels; retry until the
+            // PTY reports the new size.
+            session
+                .send_stdin(b"stty size\n")
+                .await
+                .expect("send stty size");
+            let attempt_end = tokio::time::sleep(Duration::from_secs(1));
+            tokio::pin!(attempt_end);
+            loop {
+                tokio::select! {
+                    _ = &mut attempt_end => break,
+                    chunk = out_rx.recv() => {
+                        let text = chunk.expect("exec output channel closed during stty probe");
+                        stty.push_str(&text);
+                        if stty.contains("43 132") {
+                            break 'probe;
+                        }
+                    }
+                }
+            }
+        }
+        println!("verified remote PTY resized: stty size reported '43 132'");
 
         // Abort session
         session.abort();

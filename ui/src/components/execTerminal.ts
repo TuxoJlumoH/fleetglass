@@ -26,6 +26,7 @@ export interface ExecClient {
     onOutput: Channel<string>,
   ) => ReturnType<typeof commands.startNodeDebugSession>;
   writeExecStdin: (id: number, data: string) => ReturnType<typeof commands.writeExecStdin>;
+  resizeExecSession?: (id: number, cols: number, rows: number) => ReturnType<typeof commands.resizeExecSession>;
   stopExecSession: (id: number) => ReturnType<typeof commands.stopExecSession>;
 }
 
@@ -38,6 +39,7 @@ export const defaultExecClient: ExecClient = {
   startNodeDebugSession: (request, onOutput) =>
     commands.startNodeDebugSession(request, onOutput),
   writeExecStdin: (id, data) => commands.writeExecStdin(id, data),
+  resizeExecSession: (id, cols, rows) => commands.resizeExecSession(id, cols, rows),
   stopExecSession: (id) => commands.stopExecSession(id),
 };
 
@@ -49,11 +51,6 @@ export function setExecClient(client?: ExecClient): void {
 
 export function getExecClient(): ExecClient {
   return globalExecClient;
-}
-
-export function stripAnsi(str: string): string {
-  // eslint-disable-next-line no-control-regex
-  return str.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "");
 }
 
 export function extractContainersFromYaml(yaml: string): string[] {

@@ -1589,7 +1589,7 @@ kbd {
   flex: 1;
   min-height: 200px;
   max-height: none;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .resource-drawer__summary {
@@ -2727,10 +2727,70 @@ textarea.resource-drawer__yaml-editor {
   color: var(--fg-terminal);
   font-family: var(--font-mono);
   font-size: var(--fs-s);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .exec-panel__terminal:focus {
   outline: 1px solid var(--accent);
+}
+
+.exec-panel__terminal .xterm-container {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.exec-panel__terminal .xterm-container[hidden] {
+  display: none;
+}
+
+.exec-panel__terminal .xterm {
+  height: 100%;
+  width: 100%;
+  padding: 2px;
+}
+
+.exec-panel__terminal .xterm-viewport {
+  background-color: var(--bg-terminal) !important;
+}
+
+.exec-panel__terminal .xterm-screen {
+  background-color: var(--bg-terminal) !important;
+}
+
+/* Node debug modal layout */
+.node-debug-dialog {
+  width: min(840px, 95vw);
+  max-height: 85vh;
+}
+
+.node-debug-terminal-container {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 380px;
+  height: 60vh;
+  max-height: 600px;
+  gap: 8px;
+}
+
+.node-debug-terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.node-debug-terminal-container .exec-panel__terminal {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  height: 100%;
 }
 
 .exec-panel__disconnect-btn {
@@ -2826,34 +2886,6 @@ textarea.resource-drawer__yaml-editor {
 
 .exec-panel__confirm-input:focus {
   outline: 1px solid var(--accent);
-}
-
-.exec-panel__output {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-all;
-  font-family: inherit;
-  font-size: inherit;
-  color: inherit;
-}
-
-.exec-panel__cursor {
-  display: inline-block;
-  width: 7px;
-  height: 14px;
-  background: var(--fg);
-  vertical-align: text-bottom;
-  margin-left: 1px;
-  animation: exec-cursor-blink 1s step-end infinite;
-}
-
-@keyframes exec-cursor-blink {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0;
-  }
 }
 
 .pf-bar {

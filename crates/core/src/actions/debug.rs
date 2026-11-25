@@ -9,7 +9,6 @@ use k8s_openapi::api::core::v1::{
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use kube::api::{Api, AttachParams, DeleteParams, Patch, PatchParams, PostParams};
 use serde_json::json;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
 use crate::actions::enforce_write_safety;
@@ -521,7 +520,7 @@ pub async fn start_node_debug_session(
         .stderr(false)
         .tty(true);
 
-    let mut attached = match pods.attach(&pod_name, &ap).await {
+    let attached = match pods.attach(&pod_name, &ap).await {
         Ok(a) => a,
         Err(e) => {
             let _ = pods.delete(&pod_name, &DeleteParams::default()).await;
@@ -529,67 +528,21 @@ pub async fn start_node_debug_session(
         }
     };
 
-    let mut stdin = match attached.stdin() {
-        Some(s) => s,
-        None => {
-            let _ = pods.delete(&pod_name, &DeleteParams::default()).await;
-            return Err(Error::Exec {
-                message: "attach stdin stream unavailable".to_owned(),
-            });
-        }
-    };
-    let mut stdout = match attached.stdout() {
-        Some(s) => s,
-        None => {
-            let _ = pods.delete(&pod_name, &DeleteParams::default()).await;
-            return Err(Error::Exec {
-                message: "attach stdout stream unavailable".to_owned(),
-            });
-        }
-    };
-
-    let (stdin_tx, mut stdin_rx) = mpsc::channel::<Vec<u8>>(128);
     let cleanup_guard = PodCleanupGuard {
         pods: pods.clone(),
         pod_name: pod_name.clone(),
     };
 
-    let task = tokio::spawn(async move {
-        let _guard = cleanup_guard;
-        let stdin_pump = async {
-            while let Some(bytes) = stdin_rx.recv().await {
-                if stdin.write_all(&bytes).await.is_err() {
-                    break;
-                }
-                if stdin.flush().await.is_err() {
-                    break;
-                }
-            }
-        };
+    let session = crate::exec::spawn_session_pumps(
+        attached,
+        request.cols.unwrap_or(80),
+        request.rows.unwrap_or(24),
+        output_tx,
+        Some(Box::new(cleanup_guard)),
+    )
+    .await?;
 
-        let stdout_pump = async {
-            let mut buf = [0u8; 4096];
-            loop {
-                match stdout.read(&mut buf).await {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        let text = String::from_utf8_lossy(&buf[..n]).into_owned();
-                        if output_tx.send(text).await.is_err() {
-                            break;
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
-        };
-
-        tokio::select! {
-            _ = stdout_pump => {},
-            _ = stdin_pump => {},
-        }
-    });
-
-    Ok((pod_name, ExecSession::new(stdin_tx, task)))
+    Ok((pod_name, session))
 }
 
 fn shell_quote(value: &str) -> String {
@@ -713,6 +666,8 @@ mod tests {
             command: vec![],
             confirmed_name: None,
             namespace: None,
+            cols: None,
+            rows: None,
         };
         assert_eq!(
             preview_debug_node_kubectl(&req),
@@ -726,6 +681,8 @@ mod tests {
             command: vec!["chroot".into(), "/host".into()],
             confirmed_name: Some("k8s-node.internal".into()),
             namespace: Some("ops-debug".into()),
+            cols: None,
+            rows: None,
         };
         assert_eq!(
             preview_debug_node_kubectl(&custom_req),
@@ -742,6 +699,8 @@ mod tests {
             command: vec!["/bin/sh".into()],
             confirmed_name: None,
             namespace: Some("kube-system".into()),
+            cols: None,
+            rows: None,
         };
         let pod = build_node_debug_pod(&req, "node-debugger-test");
         assert_eq!(pod.metadata.name.as_deref(), Some("node-debugger-test"));
@@ -781,6 +740,8 @@ mod tests {
             command: vec![],
             confirmed_name: None,
             namespace: None,
+            cols: None,
+            rows: None,
         };
         assert!(matches!(
             validate_node_debug_request(&req),
@@ -811,5 +772,30 @@ mod tests {
             name.chars()
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
         );
+    }
+
+    #[test]
+    fn node_debug_request_accepts_optional_dimensions() {
+        let req: DebugNodeRequest = serde_json::from_value(serde_json::json!({
+            "context": "prod",
+            "node": "worker-1",
+            "image": "busybox:1.37",
+            "confirmedName": null,
+            "namespace": null,
+            "cols": 100,
+            "rows": 30,
+        }))
+        .unwrap();
+        assert_eq!((req.cols, req.rows), (Some(100), Some(30)));
+
+        let legacy: DebugNodeRequest = serde_json::from_value(serde_json::json!({
+            "context": "prod",
+            "node": "worker-1",
+            "image": "busybox:1.37",
+            "confirmedName": null,
+            "namespace": null,
+        }))
+        .unwrap();
+        assert_eq!((legacy.cols, legacy.rows), (None, None));
     }
 }

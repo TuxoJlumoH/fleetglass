@@ -2,6 +2,7 @@ import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { FitAddon } from "@xterm/addon-fit";
 import type { ResourceDetail } from "../generated/bindings";
 import { initialContextsState, useContextsStore } from "../stores/contexts";
 import type { Row } from "../stores/pods";
@@ -227,12 +228,12 @@ describe("R-10 Exec shell UI and ResourceDrawer integration", () => {
 
     emitChunk("root@nginx-0:/# ");
     await waitFor(() => {
-      expect(screen.getByTestId("exec-output")).toHaveTextContent("root@nginx-0:/#");
+      expect(screen.getByTestId("exec-terminal").querySelector(".xterm-rows")).toHaveTextContent("root@nginx-0:/#");
     });
 
-    emitChunk("ls -l\n-rw-r--r-- 1 root root index.html\n");
+    emitChunk("ls -l\r\n-rw-r--r-- 1 root root index.html\r\n");
     await waitFor(() => {
-      expect(screen.getByTestId("exec-output")).toHaveTextContent("index.html");
+      expect(screen.getByTestId("exec-terminal").querySelector(".xterm-rows")).toHaveTextContent("index.html");
     });
   });
 
@@ -264,18 +265,21 @@ describe("R-10 Exec shell UI and ResourceDrawer integration", () => {
     });
 
     const terminal = screen.getByTestId("exec-terminal");
-    await user.type(terminal, "ls");
+    const textarea = terminal.querySelector<HTMLTextAreaElement>(".xterm-helper-textarea");
+    expect(textarea).toBeInTheDocument();
+    if (!textarea) throw new Error("Missing xterm textarea");
 
+    await user.type(textarea, "ls");
     expect(writeExecStdin).toHaveBeenCalledWith(77, "l");
     expect(writeExecStdin).toHaveBeenCalledWith(77, "s");
 
-    fireEvent.keyDown(terminal, { key: "Enter" });
-    expect(writeExecStdin).toHaveBeenCalledWith(77, "\n");
+    fireEvent.keyDown(textarea, { key: "Enter", keyCode: 13 });
+    expect(writeExecStdin).toHaveBeenCalledWith(77, "\r");
 
-    fireEvent.keyDown(terminal, { key: "Backspace" });
+    fireEvent.keyDown(textarea, { key: "Backspace", keyCode: 8 });
     expect(writeExecStdin).toHaveBeenCalledWith(77, "\x7f");
 
-    fireEvent.keyDown(terminal, { key: "c", ctrlKey: true });
+    fireEvent.keyDown(textarea, { key: "c", ctrlKey: true, keyCode: 67 });
     expect(writeExecStdin).toHaveBeenCalledWith(77, "\x03");
   });
 
@@ -504,5 +508,60 @@ describe("R-10 Exec shell UI and ResourceDrawer integration", () => {
       "nginx-0",
       expect.anything(),
     );
+  });
+
+  it("05-02: ExecShellPanel integrates xterm.js and supports resize signaling", async () => {
+    const user = userEvent.setup();
+    const resizeExecSession = vi.fn().mockResolvedValue({ status: "ok", data: null });
+    const fitSpy = vi.spyOn(FitAddon.prototype, "fit").mockImplementation(function (this: FitAddon) {
+      const internal = this as unknown as { _terminal?: { resize: (cols: number, rows: number) => void } };
+      internal._terminal?.resize(110, 35);
+    });
+    const clientWidthSpy = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(800);
+    const clientHeightSpy = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(400);
+
+    const fakeClient: ExecClient = {
+      createChannel: () => ({ id: 1, send: vi.fn() } as unknown as ReturnType<NonNullable<ExecClient["createChannel"]>>),
+      startExecSession: vi.fn().mockResolvedValue({ status: "ok", data: 123 }),
+      writeExecStdin: vi.fn().mockResolvedValue({ status: "ok", data: null }),
+      resizeExecSession,
+      stopExecSession: vi.fn().mockResolvedValue({ status: "ok", data: true }),
+    };
+
+    render(
+      <ExecShellPanel
+        pod="nginx-0"
+        cluster="kind-dev"
+        namespace="default"
+        containers={["nginx"]}
+        readOnly={false}
+        execClient={fakeClient}
+      />,
+    );
+
+    await user.click(screen.getByTestId("exec-connect-btn"));
+    await waitFor(() => {
+      expect(screen.getByTestId("exec-disconnect-btn")).toBeInTheDocument();
+    });
+
+    const term = screen.getByTestId("exec-terminal");
+    expect(term.querySelector(".xterm")).toBeInTheDocument();
+
+    // Verify resize was signaled to the backend with fitted dimensions
+    await waitFor(() => {
+      expect(resizeExecSession).toHaveBeenCalledWith(123, 110, 35);
+    });
+    expect(resizeExecSession).toHaveBeenCalledTimes(1);
+
+    // Disconnecting keeps the scrollback visible but stops resize signalling.
+    await user.click(screen.getByTestId("exec-disconnect-btn"));
+    window.dispatchEvent(new Event("resize"));
+    await new Promise((r) => setTimeout(r, 120));
+    expect(resizeExecSession).toHaveBeenCalledTimes(1);
+    expect(term.querySelector(".xterm-rows")).toHaveTextContent("[Session disconnected]");
+
+    fitSpy.mockRestore();
+    clientWidthSpy.mockRestore();
+    clientHeightSpy.mockRestore();
   });
 });
