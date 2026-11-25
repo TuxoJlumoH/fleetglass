@@ -5164,6 +5164,12 @@ button.pf-bar__link {
   color: var(--err);
 }
 
+/* Restricted watch scope after a cluster-wide 403 (05-01): informational, not an error. */
+.pod-table__notice--scope .pill {
+  max-width: 100%;
+  white-space: normal;
+}
+
 /* Partial list while the initial list streams in: always labelled. */
 .pod-table__notice--progress {
   border-bottom: 1px solid var(--border);

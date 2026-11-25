@@ -138,6 +138,20 @@ fn has_data(state: &StoreAccessState) -> bool {
     )
 }
 
+/// Problem text of a store watched namespace by namespace (05-01).
+fn restricted_message(scope: &crate::api::WatchScope) -> String {
+    match scope.namespaces.as_slice() {
+        [only] => format!(
+            "Restricted to namespace {} (cluster-wide watch forbidden)",
+            only.namespace
+        ),
+        all => format!(
+            "Restricted to {} namespaces (cluster-wide watch forbidden)",
+            all.len()
+        ),
+    }
+}
+
 /// The user-readable problem of a store that cannot show data, if any.
 fn access_problem(state: StoreAccessState) -> Option<String> {
     match state {
@@ -868,6 +882,12 @@ fn scan_cluster(manager: &ClusterManager, cluster: &str, now: Timestamp) -> Clus
                 problems.push(KindProblem {
                     kind: kind.to_owned(),
                     message,
+                });
+            } else if let Some(scope) = store.scope() {
+                // Counts are real but cover only these namespaces (05-01).
+                problems.push(KindProblem {
+                    kind: kind.to_owned(),
+                    message: restricted_message(&scope),
                 });
             }
             stores.insert(kind, (store, access));

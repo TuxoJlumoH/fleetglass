@@ -26,6 +26,7 @@ pub mod logs;
 pub mod logs_mux;
 pub mod mcp;
 pub mod metrics;
+pub mod ns_fallback;
 pub mod overview;
 pub mod plugins;
 pub mod portforward;

@@ -414,6 +414,50 @@ pub struct StoreAccess {
     /// optional on both sides of the IPC.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub paused: bool,
+    /// Set when the cluster-wide list/watch was forbidden (HTTP 403) and the store
+    /// is fed by per-namespace watchers instead (05-01): rows cover only these
+    /// namespaces. `None` for a normal cluster-wide watch. Omitted when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<WatchScope>,
+}
+
+/// Restricted scope of a store whose cluster-wide watch is forbidden (05-01).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct WatchScope {
+    /// Namespaces watched one by one, sorted by name, each with its own state.
+    /// Bounded by [`crate::ns_fallback::MAX_FALLBACK_NAMESPACES`].
+    pub namespaces: Vec<NamespaceWatch>,
+    /// Where the namespace candidates came from.
+    pub source: NamespaceSource,
+    /// Candidates whose rules review denied `list` or `watch`, sorted; not watched.
+    pub denied: Vec<String>,
+    /// `true` when there were more candidates than the cap and some were not checked.
+    pub truncated: bool,
+}
+
+/// State of one per-namespace watcher of a [`WatchScope`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct NamespaceWatch {
+    pub namespace: String,
+    pub access: StoreAccessState,
+}
+
+/// Origin of the namespaces a restricted store watches (05-01).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub enum NamespaceSource {
+    /// The context's `watchNamespaces` setting ([`ContextSettings::watch_namespaces`]).
+    Configured,
+    /// Listing namespaces was allowed; each was checked with a `SelfSubjectRulesReview`.
+    Discovered,
+    /// Listing namespaces was forbidden too: the kubeconfig context's namespace
+    /// (or `default`) was checked as a last resort.
+    ContextNamespace,
 }
 
 /// Row counts of one watched `(cluster, kind)` store, for the sidebar (02-07c).
@@ -466,6 +510,11 @@ pub struct ContextSettings {
     pub pinned: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unlocked_until: Option<u32>,
+    /// Namespaces to watch one by one when a cluster-wide list/watch is forbidden
+    /// (05-01). Empty: detect them (namespace list + access reviews, else the
+    /// kubeconfig context's namespace). Omitted when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub watch_namespaces: Vec<String>,
 }
 
 impl ContextSettings {

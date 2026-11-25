@@ -1456,6 +1456,7 @@ mod tests {
             rows: 0,
             metrics: None,
             paused: false,
+            scope: None,
         });
         assert_eq!(access_summary(&manager, &page), None);
         page.access[0].access = StoreAccessState::Loading { rows_so_far: 7 };

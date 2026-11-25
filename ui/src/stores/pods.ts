@@ -527,25 +527,41 @@ function normaliseRow(row: Row_Deserialize): Row_Serialize {
 }
 
 /** Channel payloads use the `_Deserialize` shapes (optional `null`s); normalise to `_Serialize`. */
+type AccessStateIn = PageDelta_Deserialize["page"]["access"][number]["access"];
+
+function normaliseAccessState(access: AccessStateIn): StoreAccessState {
+  return access.state === "forbidden"
+    ? { ...access, namespace: access.namespace ?? null }
+    : access.state === "error"
+      ? { ...access, partialRows: access.partialRows ?? null }
+      : access.state === "authExpired"
+        ? {
+            ...access,
+            deviceCode: access.deviceCode ?? null,
+            partialRows: access.partialRows ?? null,
+          }
+        : access;
+}
+
 function normaliseAccess(entry: PageDelta_Deserialize["page"]["access"][number]): StoreAccess {
-  const { access } = entry;
+  const { scope } = entry;
   return {
     cluster: entry.cluster,
     kind: entry.kind,
-    access:
-      access.state === "forbidden"
-        ? { ...access, namespace: access.namespace ?? null }
-        : access.state === "error"
-          ? { ...access, partialRows: access.partialRows ?? null }
-          : access.state === "authExpired"
-            ? {
-                ...access,
-                deviceCode: access.deviceCode ?? null,
-                partialRows: access.partialRows ?? null,
-              }
-            : access,
+    access: normaliseAccessState(entry.access),
     rows: entry.rows ?? 0,
     metrics: entry.metrics ?? null,
     ...(entry.paused === true ? { paused: true } : {}),
+    ...(scope !== null && scope !== undefined
+      ? {
+          scope: {
+            ...scope,
+            namespaces: scope.namespaces.map((n) => ({
+              namespace: n.namespace,
+              access: normaliseAccessState(n.access),
+            })),
+          },
+        }
+      : {}),
   };
 }

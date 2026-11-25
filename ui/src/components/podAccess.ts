@@ -93,6 +93,53 @@ export function accessNotice(entry: StoreAccess): AccessNotice | null {
 }
 
 /**
+ * Store watched namespace by namespace because its cluster-wide list/watch is forbidden
+ * (05-01). Shown as a status pill, not an error: the rows are real, just limited.
+ */
+export interface RestrictedScope {
+  cluster: string;
+  /** Short pill text, e.g. "Restricted: 3 namespaces (cluster-wide watch forbidden)". */
+  label: string;
+  /** Longer explanation for the tooltip / screen readers. */
+  detail: string;
+}
+
+const SOURCE_DETAIL = {
+  configured: "from this context's namespace settings",
+  discovered: "every namespace you may list",
+  contextNamespace: "the kubeconfig context's namespace",
+} as const;
+
+export function restrictedScope(entry: StoreAccess): RestrictedScope | null {
+  const { scope } = entry;
+  if (scope === undefined) return null;
+  const watched = scope.namespaces.map((n) => n.namespace);
+  const count = watched.length;
+  const label = `Restricted: ${count === 1 ? `namespace ${watched[0] ?? ""}` : `${formatCount(count)} namespaces`} (cluster-wide watch forbidden)`;
+  const parts = [
+    `${entry.cluster}: no permission to watch ${kindNoun(entry.kind)} cluster-wide, so only ${count === 1 ? "this namespace is" : "these namespaces are"} watched (${SOURCE_DETAIL[scope.source]}): ${watched.join(", ")}.`,
+  ];
+  if (scope.denied.length > 0) parts.push(`Not permitted: ${scope.denied.join(", ")}.`);
+  if (scope.truncated) parts.push("More namespaces exist than are checked; set the namespaces to watch in the context settings.");
+  return {
+    cluster: entry.cluster,
+    label,
+    detail: parts.join(" "),
+  };
+}
+
+/** Restricted-scope pills of the queried clusters, one per restricted store. */
+export function restrictedScopes(
+  clusters: readonly string[],
+  access: readonly StoreAccess[],
+): RestrictedScope[] {
+  return access
+    .filter((a) => clusters.includes(a.cluster))
+    .map(restrictedScope)
+    .filter((s): s is RestrictedScope => s !== null);
+}
+
+/**
  * Notices for every queried cluster that is not Ready. A cluster without an access
  * entry yet (first page still pending) counts as connecting.
  */

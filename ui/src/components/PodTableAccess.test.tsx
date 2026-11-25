@@ -15,7 +15,7 @@ import {
   usePodsStore,
 } from "../stores/pods";
 import { PodTable } from "./PodTable";
-import { accessNotice } from "./podAccess";
+import { accessNotice, restrictedScope } from "./podAccess";
 
 function makeRow(cluster: string, name: string): Row {
   return {
@@ -417,6 +417,51 @@ describe("PodTable access states", () => {
         "No permission to list pods in dev — showing last known rows (may be outdated)",
       ),
     ).toHaveAttribute("role", "alert");
+  });
+
+  it("05-01: a restricted store shows a status pill, not an error banner", async () => {
+    const restricted: StoreAccess = {
+      ...podAccess("dev", { state: "ready" }, 2),
+      scope: {
+        namespaces: ["api", "web", "jobs"].map((namespace) => ({
+          namespace,
+          access: { state: "ready" },
+        })),
+        source: "configured",
+        denied: ["prod"],
+        truncated: false,
+      },
+    };
+    setQueryFetcher((spec) =>
+      Promise.resolve(
+        makePage(spec, [makeRow("dev", "web-0"), makeRow("dev", "web-1")], [restricted]),
+      ),
+    );
+    selectContext("dev");
+    render(<PodTable />);
+    const pill = await screen.findByTestId("restricted-scope");
+    expect(pill).toHaveAttribute("role", "status");
+    expect(within(pill).getByText("Restricted: 3 namespaces (cluster-wide watch forbidden)"))
+      .toHaveClass("pill", "warn");
+    expect(pill).toHaveAttribute("title", expect.stringContaining("api, web, jobs"));
+    expect(pill).toHaveAttribute("title", expect.stringContaining("Not permitted: prod."));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("05-01: a single restricted namespace is named; no scope means no pill", () => {
+    const one = restrictedScope({
+      ...podAccess("dev", { state: "ready" }),
+      scope: {
+        namespaces: [{ namespace: "dev", access: { state: "ready" } }],
+        source: "contextNamespace",
+        denied: [],
+        truncated: true,
+      },
+    });
+    expect(one?.label).toBe("Restricted: namespace dev (cluster-wide watch forbidden)");
+    expect(one?.detail).toContain("the kubeconfig context's namespace");
+    expect(one?.detail).toContain("More namespaces exist");
+    expect(restrictedScope(podAccess("dev", { state: "ready" }))).toBeNull();
   });
 
   it("R-14d: a partial first list keeps its own label, not 'last known'", () => {
