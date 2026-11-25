@@ -29,12 +29,18 @@ import {
   searchKeymap,
 } from "@codemirror/search";
 import { yaml } from "@codemirror/lang-yaml";
+import { k8sYamlLinter } from "../schema/yamlLinter";
+import { k8sYamlAutocomplete } from "../schema/yamlAutocomplete";
+import { k8sYamlHover } from "../schema/yamlHover";
+import type { SchemaLookup } from "../schema/types";
 
 export interface ExtensionOptions {
   readOnlyCompartment?: Compartment;
   readOnly?: boolean;
   themeCompartment?: Compartment;
   theme?: "dark" | "light";
+  schemaCompartment?: Compartment;
+  schemaLookup?: SchemaLookup | undefined;
 }
 
 export const fleetglassDarkTheme = EditorView.theme({
@@ -85,6 +91,22 @@ export const fleetglassDarkTheme = EditorView.theme({
     border: "1px solid var(--border, #2a2f3a)",
     backgroundColor: "var(--bg-elev, #181b21)",
     color: "var(--fg, #d7dae0)",
+  },
+  ".cm-tooltip-autocomplete": {
+    "& > ul": {
+      fontFamily: "var(--font-mono, monospace)",
+      fontSize: "11px",
+      maxHeight: "180px",
+    },
+    "& > ul > li[aria-selected]": {
+      backgroundColor: "var(--accent-subtle, rgba(76, 141, 255, 0.25))",
+      color: "var(--fg, #d7dae0)",
+    },
+  },
+  ".cm-diagnostic": {
+    padding: "4px 8px",
+    fontSize: "11px",
+    fontFamily: "var(--font-sans, system-ui, sans-serif)",
   },
   ".cm-panels": {
     backgroundColor: "var(--bg-elev, #181b21)",
@@ -149,6 +171,22 @@ export const fleetglassLightTheme = EditorView.theme({
     backgroundColor: "var(--bg-elev, #f6f7f9)",
     color: "var(--fg, #1f2328)",
   },
+  ".cm-tooltip-autocomplete": {
+    "& > ul": {
+      fontFamily: "var(--font-mono, monospace)",
+      fontSize: "11px",
+      maxHeight: "180px",
+    },
+    "& > ul > li[aria-selected]": {
+      backgroundColor: "var(--bg-sel, #e8f0fe)",
+      color: "var(--fg, #1f2328)",
+    },
+  },
+  ".cm-diagnostic": {
+    padding: "4px 8px",
+    fontSize: "11px",
+    fontFamily: "var(--font-sans, system-ui, sans-serif)",
+  },
   ".cm-panels": {
     backgroundColor: "var(--bg-elev, #f6f7f9)",
     color: "var(--fg, #1f2328)",
@@ -189,12 +227,20 @@ export function getThemeExtension(theme: "dark" | "light" = "dark"): Extension {
     : [fleetglassDarkTheme, syntaxHighlighting(fleetglassDarkHighlightStyle, { fallback: true })];
 }
 
+/** Validation, completion and hover; nothing at all without a schema source. */
+export function getSchemaExtension(lookup?: SchemaLookup): Extension {
+  if (!lookup) return [];
+  return [k8sYamlLinter(lookup), k8sYamlAutocomplete(lookup), k8sYamlHover(lookup)];
+}
+
 export function getYamlEditorExtensions(options: ExtensionOptions = {}): Extension[] {
   const {
     readOnlyCompartment,
     readOnly = false,
     themeCompartment,
     theme = "dark",
+    schemaCompartment,
+    schemaLookup,
   } = options;
 
   const readOnlyExtension = readOnlyCompartment
@@ -204,6 +250,10 @@ export function getYamlEditorExtensions(options: ExtensionOptions = {}): Extensi
   const themeExtension = themeCompartment
     ? themeCompartment.of(getThemeExtension(theme))
     : getThemeExtension(theme);
+
+  const schemaExtension = schemaCompartment
+    ? schemaCompartment.of(getSchemaExtension(schemaLookup))
+    : getSchemaExtension(schemaLookup);
 
   return [
     lineNumbers(),
@@ -221,6 +271,7 @@ export function getYamlEditorExtensions(options: ExtensionOptions = {}): Extensi
     highlightSelectionMatches(),
     keymap.of([...searchKeymap, ...foldKeymap]),
     yaml(),
+    schemaExtension,
     EditorView.lineWrapping,
     EditorView.cspNonce.of("fleetglass"),
     readOnlyExtension,

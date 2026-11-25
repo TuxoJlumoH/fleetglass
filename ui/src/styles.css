@@ -1537,6 +1537,13 @@ kbd {
   outline: none;
 }
 
+.resource-drawer__schema-note {
+  margin: 0;
+  padding: 4px 12px;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
 .resource-drawer__body {
   flex: 1;
   min-height: 0;
@@ -2224,6 +2231,69 @@ textarea.resource-drawer__yaml-editor {
   overflow: auto;
   font-family: var(--font-mono);
   font-size: var(--fs-s);
+}
+
+.k8s-hover-tooltip {
+  padding: 8px 12px;
+  max-width: 420px;
+  font-size: 11px;
+  line-height: 1.45;
+  font-family: var(--font-sans, system-ui, sans-serif);
+}
+
+.k8s-hover-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.k8s-hover-title {
+  font-weight: 600;
+  font-family: var(--font-mono, monospace);
+  color: var(--accent);
+}
+
+.k8s-hover-type {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.k8s-hover-badge {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.k8s-hover-badge.required {
+  background-color: color-mix(in srgb, var(--err, #f85149) 15%, transparent);
+  color: var(--err, #f85149);
+  border: 1px solid color-mix(in srgb, var(--err, #f85149) 30%, transparent);
+}
+
+.k8s-hover-badge.default {
+  background-color: var(--bg-hover);
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+}
+
+.k8s-hover-desc {
+  color: var(--fg);
+  margin-bottom: 6px;
+}
+
+.k8s-hover-enum {
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  color: var(--fg-muted);
+  background: var(--bg);
+  padding: 4px 6px;
+  border-radius: 2px;
+  border: 1px solid var(--border);
 }
 
 .resource-drawer__kubectl-preview,

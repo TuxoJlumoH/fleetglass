@@ -1,8 +1,13 @@
 import { useEffect, useRef, type JSX } from "react";
 import { EditorState, Compartment } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { getThemeExtension, getYamlEditorExtensions } from "./yamlEditorExtensions";
+import {
+  getSchemaExtension,
+  getThemeExtension,
+  getYamlEditorExtensions,
+} from "./yamlEditorExtensions";
 import { useSettingsStore } from "../stores/settings";
+import type { SchemaLookup } from "../schema/types";
 
 export interface YamlEditorProps {
   value: string;
@@ -12,6 +17,8 @@ export interface YamlEditorProps {
   className?: string;
   forceCodeMirror?: boolean;
   theme?: "dark" | "light";
+  /** Schema source for validation, completion and hover; none means plain editing. */
+  schemaLookup?: SchemaLookup | undefined;
 }
 
 export function YamlEditor({
@@ -22,6 +29,7 @@ export function YamlEditor({
   className = "resource-drawer__yaml-editor",
   forceCodeMirror = false,
   theme: themeProp,
+  schemaLookup,
 }: YamlEditorProps): JSX.Element {
   const isJsdom =
     typeof navigator !== "undefined" &&
@@ -40,8 +48,10 @@ export function YamlEditor({
 
   const readOnlyCompartmentRef = useRef(new Compartment());
   const themeCompartmentRef = useRef(new Compartment());
+  const schemaCompartmentRef = useRef(new Compartment());
   const initialReadOnlyRef = useRef(readOnly);
   const initialThemeRef = useRef(activeTheme);
+  const initialSchemaLookupRef = useRef(schemaLookup);
 
   useEffect(() => {
     if (isJsdom && !forceCodeMirror) return;
@@ -55,6 +65,8 @@ export function YamlEditor({
           readOnly: initialReadOnlyRef.current,
           themeCompartment: themeCompartmentRef.current,
           theme: initialThemeRef.current,
+          schemaCompartment: schemaCompartmentRef.current,
+          schemaLookup: initialSchemaLookupRef.current,
         }),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
@@ -116,6 +128,17 @@ export function YamlEditor({
       ),
     });
   }, [activeTheme, isJsdom, forceCodeMirror]);
+
+  useEffect(() => {
+    if (isJsdom && !forceCodeMirror) return;
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: schemaCompartmentRef.current.reconfigure(
+        getSchemaExtension(schemaLookup),
+      ),
+    });
+  }, [schemaLookup, isJsdom, forceCodeMirror]);
 
   if (isJsdom && !forceCodeMirror) {
     return (

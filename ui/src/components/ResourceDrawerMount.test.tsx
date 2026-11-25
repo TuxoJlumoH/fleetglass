@@ -244,6 +244,51 @@ describe("Task R-04: Mount ResourceDrawer from PodTable with mockIPC", () => {
     });
   });
 
+  it("YAML tab fetches the cluster schema and shows an honest note when it is unavailable (05-04)", async () => {
+    const user = userEvent.setup();
+    mockIPC((cmd, args) => {
+      ipcCalls.push({ cmd, args });
+      if (cmd === "query_page") {
+        return {
+          total: 1,
+          offset: 0,
+          limit: 100,
+          rows: [sampleRow],
+          version: 1,
+          access: [{ cluster: "kind-dev", kind: "Pod", access: { state: "ready" } }],
+        };
+      }
+      if (cmd === "subscribe_query") return 1;
+      if (cmd === "unsubscribe_query") return true;
+      if (cmd === "get_resource_detail") return sampleDetail;
+      if (cmd === "get_resource_schema") {
+        return {
+          state: "unavailable",
+          reason: "forbidden",
+          message: "no permission to read the OpenAPI schema (403)",
+        };
+      }
+      return undefined;
+    });
+    render(<PodTable />);
+    fireEvent.doubleClick(await screen.findByText("nginx-0"));
+    await screen.findByRole("region", { name: "Resource details" });
+    await waitFor(() => {
+      expect(ipcCalls.some((c) => c.cmd === "get_resource_detail")).toBe(true);
+    });
+    // Not fetched before the YAML tab is shown.
+    expect(ipcCalls.some((c) => c.cmd === "get_resource_schema")).toBe(false);
+
+    await user.click(screen.getByRole("tab", { name: "YAML" }));
+    expect(await screen.findByTestId("yaml-schema-note")).toHaveTextContent(
+      "Schema unavailable: no permission to read the OpenAPI schema (403) (v1 Pod)",
+    );
+    const schemaCalls = ipcCalls.filter((c) => c.cmd === "get_resource_schema");
+    expect(schemaCalls.map((c) => c.args)).toEqual([
+      { context: "kind-dev", apiVersion: "v1", kind: "Pod" },
+    ]);
+  });
+
   it("Test 3: Events tab displays events from detail.events", async () => {
     const user = userEvent.setup();
     render(<PodTable />);
