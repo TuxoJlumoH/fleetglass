@@ -8,7 +8,13 @@ import {
   type RowStatus,
   type StoreAccess,
 } from "../generated/bindings";
-import { loadingProgress, partialSuffix, reconnectingText, staleSuffix } from "./podAccess";
+import {
+  loadingProgress,
+  partialSuffix,
+  reconnectingText,
+  restrictedScope,
+  staleSuffix,
+} from "./podAccess";
 
 const PAGE_LIMIT = 100;
 const FILTER_DEBOUNCE_MS = 150;
@@ -65,6 +71,21 @@ function groupByKind(components: AppResource[]): [string, AppResource[]][] {
 function renderBanners(accessList: StoreAccess[]) {
   const banners: React.ReactNode[] = [];
   accessList.forEach((item, index) => {
+    const restricted = restrictedScope(item);
+    if (restricted !== null) {
+      banners.push(
+        <div
+          key={`restricted-${item.cluster}-${item.kind}-${String(index)}`}
+          role="status"
+          className="app-view__banner app-view__banner--scope"
+          data-testid="restricted-scope"
+          title={restricted.detail}
+        >
+          <span className="pill warn">{restricted.label}</span>
+          <span className="visually-hidden"> {restricted.detail}</span>
+        </div>,
+      );
+    }
     if (item.access.state === "forbidden") {
       const resource = item.access.resource;
       const message = item.access.message;

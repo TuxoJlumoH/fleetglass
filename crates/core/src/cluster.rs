@@ -39,8 +39,9 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
 use crate::api::{
-    AppPage, AppQuerySpec, AppSummary, Cell, ColumnDef, KindCount, MetricsAvailability, Page,
-    PageDelta, QuerySpec, Row, RowStatus, StoreAccess, StoreAccessState,
+    AppPage, AppQuerySpec, AppSummary, Cell, ColumnDef, KindCount, MetricsAvailability,
+    NamespaceWatch, Page, PageDelta, QuerySpec, Row, RowStatus, StoreAccess, StoreAccessState,
+    WatchScope,
 };
 use crate::app_view::group_rows_by_app_iter;
 use crate::columns::CustomColumns;
@@ -50,6 +51,7 @@ use crate::metrics::{
     METRICS_POLL_INTERVAL, METRICS_POLL_TIMEOUT, METRICS_STOP_GRACE, UsageMap, apply_usage,
     classify_metrics_error, fetch_usage, usage_cell_indices,
 };
+use crate::ns_fallback::FallbackPlan;
 use crate::projection::{classify_kube_error, project_pod_with_columns};
 use crate::query::{clamp_limit, execute_query_iter};
 use crate::shell_env::ShellEnv;
@@ -321,6 +323,37 @@ type ClientMap = Arc<Mutex<HashMap<String, Arc<tokio::sync::OnceCell<kube::Clien
 type StoreMap = Arc<RwLock<HashMap<(String, String), Arc<ResourceStore>>>>;
 type ColumnMap = Arc<RwLock<HashMap<String, Arc<CustomColumns>>>>;
 type DiscoveryMap = Arc<RwLock<HashMap<String, Vec<ApiResource>>>>;
+/// Per cluster, `group/plural` of the discovered namespaced resources (05-01):
+/// only those get a per-namespace fallback.
+type NamespacedMap = Arc<RwLock<HashMap<String, HashSet<String>>>>;
+/// Per-context `watchNamespaces` settings (05-01), shared with every store.
+type WatchNamespacesMap = Arc<RwLock<HashMap<String, Vec<String>>>>;
+
+/// After a namespace fallback could not start (no accessible namespace, or the
+/// access reviews failed), the cluster-wide watch keeps retrying with its own
+/// backoff, but the fallback is not planned again before this delay (or a resync).
+const FALLBACK_RETRY: Duration = Duration::from_secs(300);
+
+/// How a store whose cluster-wide list/watch is forbidden switches to one
+/// watcher per accessible namespace (05-01). Only namespaced kinds have one.
+pub(crate) struct NamespaceFallback<K> {
+    client: kube::Client,
+    /// API group (`""` for core) and plural resource, for the access reviews.
+    group: String,
+    resource: String,
+    api_for: NamespacedApiFn<K>,
+}
+
+/// Builds the `Api` of one namespace for a [`NamespaceFallback`].
+type NamespacedApiFn<K> = Arc<dyn Fn(&str) -> kube::Api<K> + Send + Sync>;
+
+/// How [`ResourceStore::run_namespace_fallback`] ended.
+enum FallbackEnd {
+    /// A resync was requested: retry the cluster-wide watch.
+    Resync,
+    /// The store is gone or every stream ended.
+    Closed,
+}
 
 pub struct ResourceStore {
     cluster: String,
@@ -346,6 +379,11 @@ pub struct ResourceStore {
     metrics_client: Mutex<Option<kube::Client>>,
     /// Signalled when the last subscriber leaves, so the poller can stop.
     metrics_idle: tokio::sync::Notify,
+    /// Restricted scope while per-namespace watchers replace a forbidden
+    /// cluster-wide watch (05-01); `None` for a cluster-wide watch.
+    scope: RwLock<Option<WatchScope>>,
+    /// The manager's per-context `watchNamespaces` settings, if registered.
+    watch_namespaces: Mutex<Option<WatchNamespacesMap>>,
 }
 
 impl ResourceStore {
@@ -387,6 +425,8 @@ impl ResourceStore {
             synced: AtomicBool::new(false),
             watcher: Mutex::new(WatcherSlot::default()),
             client_invalidator: Mutex::new(None),
+            scope: RwLock::new(None),
+            watch_namespaces: Mutex::new(None),
         })
     }
 
@@ -407,6 +447,155 @@ impl ResourceStore {
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         guard.clone()
+    }
+
+    /// Restricted scope of a store fed by per-namespace watchers (05-01), `None`
+    /// for a cluster-wide watch.
+    #[must_use]
+    pub fn scope(&self) -> Option<WatchScope> {
+        self.scope
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    fn set_watch_namespaces_map(&self, map: WatchNamespacesMap) {
+        *self
+            .watch_namespaces
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(map);
+    }
+
+    /// Configured `watchNamespaces` of this store's context (empty: detect).
+    fn configured_namespaces(&self) -> Vec<String> {
+        let map = self
+            .watch_namespaces
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        map.and_then(|m| {
+            m.read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get(&self.cluster)
+                .cloned()
+        })
+        .unwrap_or_default()
+    }
+
+    /// Switches the store to the per-namespace scope of `plan`: every watched
+    /// namespace starts loading, and rows outside those namespaces (left from an
+    /// earlier cluster-wide list) are dropped, so rows and scope always agree.
+    fn enter_namespace_scope(&self, plan: &FallbackPlan) {
+        let scope = WatchScope {
+            namespaces: plan
+                .allowed
+                .iter()
+                .map(|ns| NamespaceWatch {
+                    namespace: ns.clone(),
+                    access: StoreAccessState::CONNECTING,
+                })
+                .collect(),
+            source: plan.source,
+            denied: plan.denied.clone(),
+            truncated: plan.truncated,
+        };
+        let mut data = self.data.write().unwrap_or_else(PoisonError::into_inner);
+        data.rows.retain(|_, row| {
+            row.namespace
+                .as_ref()
+                .is_some_and(|ns| plan.allowed.binary_search(ns).is_ok())
+        });
+        let rows = data.rows.len();
+        let access = combined_namespace_access(&scope.namespaces, self.has_synced(), rows);
+        *self.scope.write().unwrap_or_else(PoisonError::into_inner) = Some(scope);
+        self.replace_access(access);
+        drop(data);
+        self.notify_changed();
+    }
+
+    /// `true` when a change of the context's `watchNamespaces` should re-plan this
+    /// store: it runs a per-namespace fallback, or its cluster-wide watch is
+    /// forbidden (possibly because no namespace was accessible before).
+    fn wants_fallback_replan(&self) -> bool {
+        self.scope().is_some()
+            || matches!(
+                self.access(),
+                StoreAccessState::Forbidden {
+                    namespace: None,
+                    ..
+                }
+            )
+    }
+
+    /// Back to a cluster-wide watch (watcher start or resync): clears the scope
+    /// and reports the store as (re)connecting.
+    fn leave_namespace_scope(&self) {
+        let had = self
+            .scope
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+            .is_some();
+        if had {
+            self.notify_changed();
+        }
+        self.watcher_starting();
+    }
+
+    /// Sets the state of one per-namespace watcher and recomputes the store's
+    /// access state from all of them, with one notification on a change.
+    fn set_namespace_state(&self, namespace: &str, state: StoreAccessState) {
+        // Lock order data → scope → access, as in `enter_namespace_scope`.
+        let data = self.data.read().unwrap_or_else(PoisonError::into_inner);
+        let mut scope = self.scope.write().unwrap_or_else(PoisonError::into_inner);
+        let Some(scope) = scope.as_mut() else {
+            return;
+        };
+        let Some(entry) = scope
+            .namespaces
+            .iter_mut()
+            .find(|n| n.namespace == namespace)
+        else {
+            return;
+        };
+        let mut changed = false;
+        if entry.access != state {
+            entry.access = state;
+            changed = true;
+        }
+        let access =
+            combined_namespace_access(&scope.namespaces, self.has_synced(), data.rows.len());
+        changed |= self.replace_access(access);
+        drop(data);
+        if changed {
+            self.notify_changed();
+        }
+    }
+
+    /// Replaces the rows of `namespace` with a completed list of it (projected
+    /// with `projected_with`): rows of that namespace not in the list are removed.
+    fn replace_namespace_rows(
+        &self,
+        namespace: &str,
+        mut rows: BTreeMap<String, Row>,
+        projected_with: &Arc<CustomColumns>,
+    ) {
+        let mut guard = self.data.write().unwrap_or_else(PoisonError::into_inner);
+        if !Arc::ptr_eq(&guard.columns, projected_with) && *guard.columns != **projected_with {
+            let mapping = column_mapping(projected_with, &guard.columns);
+            for row in rows.values_mut() {
+                remap_custom(row, &mapping);
+            }
+        }
+        guard.rows.retain(|uid, row| {
+            row.namespace.as_deref() != Some(namespace) || rows.contains_key(uid)
+        });
+        for (uid, mut row) in rows {
+            guard.join_usage(&mut row);
+            guard.rows.insert(uid, row);
+        }
+        drop(guard);
+        self.notify_changed();
     }
 
     /// Current access state (ready, loading, forbidden, error, ...).
@@ -1169,7 +1358,7 @@ impl ResourceStore {
     /// Spawns a background task watching cluster-wide [`Pod`]s and projecting
     /// changes into this store.
     pub(crate) fn spawn_pod_watcher(self: &Arc<Self>, client: kube::Client) -> JoinHandle<()> {
-        self.spawn_typed_watcher(client, "pods", |pod, cluster, cols| {
+        self.spawn_namespaced_watcher(client, "pods", |pod: &Pod, cluster, cols| {
             project_pod_with_columns(pod, cluster, cols)
         })
     }
@@ -1192,7 +1381,36 @@ impl ResourceStore {
         F: Fn(&K, &str, &CustomColumns) -> Row + Send + Sync + 'static,
     {
         let api = kube::Api::<K>::all(client);
-        self.spawn_watcher_from_api(api, resource_label.to_owned(), project_fn)
+        self.spawn_watcher_from_api(api, resource_label.to_owned(), None, project_fn)
+    }
+
+    /// Like [`Self::spawn_typed_watcher`] for a namespaced kind: when the
+    /// cluster-wide list/watch is forbidden, the store falls back to one watcher
+    /// per accessible namespace (05-01, see [`crate::ns_fallback`]).
+    pub(crate) fn spawn_namespaced_watcher<K, F>(
+        self: &Arc<Self>,
+        client: kube::Client,
+        resource_label: &'static str,
+        project_fn: F,
+    ) -> JoinHandle<()>
+    where
+        K: Resource<DynamicType = (), Scope = k8s_openapi::NamespaceResourceScope>
+            + serde::de::DeserializeOwned
+            + Clone
+            + std::fmt::Debug
+            + Send
+            + 'static,
+        F: Fn(&K, &str, &CustomColumns) -> Row + Send + Sync + 'static,
+    {
+        let api = kube::Api::<K>::all(client.clone());
+        let ns_client = client.clone();
+        let fallback = NamespaceFallback {
+            client,
+            group: K::group(&()).into_owned(),
+            resource: K::plural(&()).into_owned(),
+            api_for: Arc::new(move |ns: &str| kube::Api::<K>::namespaced(ns_client.clone(), ns)),
+        };
+        self.spawn_watcher_from_api(api, resource_label.to_owned(), Some(fallback), project_fn)
     }
 
     /// Spawns a background task watching an arbitrary [`kube::Api`] and projecting
@@ -1201,6 +1419,7 @@ impl ResourceStore {
         self: &Arc<Self>,
         api: kube::Api<K>,
         resource_label: String,
+        fallback: Option<NamespaceFallback<K>>,
         project_fn: F,
     ) -> JoinHandle<()>
     where
@@ -1208,12 +1427,40 @@ impl ResourceStore {
         F: Fn(&K, &str, &CustomColumns) -> Row + Send + Sync + 'static,
     {
         let store = Arc::clone(self);
-        store.watcher_starting();
+        // A new watcher first tries the cluster-wide watch again.
+        store.leave_namespace_scope();
         let mut resync_rx = store.resync_tx.subscribe();
         let project = Arc::new(project_fn);
         tokio::spawn(async move {
             let mut last_logged_error: Option<String> = None;
+            let mut fallback_retry_at: Option<Instant> = None;
+            let mut enter_fallback: Option<FallbackPlan> = None;
             loop {
+                if let (Some(plan), Some(fb)) = (enter_fallback.take(), fallback.as_ref()) {
+                    tracing::info!(
+                        cluster = %store.cluster,
+                        kind = %store.kind,
+                        namespaces = plan.allowed.len(),
+                        "cluster-wide watch forbidden; watching namespaces one by one"
+                    );
+                    match store
+                        .run_namespace_fallback(
+                            fb,
+                            &plan,
+                            &project,
+                            &resource_label,
+                            &mut resync_rx,
+                        )
+                        .await
+                    {
+                        FallbackEnd::Resync => {
+                            fallback_retry_at = None;
+                            store.leave_namespace_scope();
+                            continue;
+                        }
+                        FallbackEnd::Closed => return,
+                    }
+                }
                 let mut stream =
                     watch_with_backoff(watcher::watcher(api.clone(), watcher::Config::default()));
                 // Rows of the initial list, projected as each object arrives so
@@ -1244,6 +1491,9 @@ impl ResourceStore {
                             if changed.is_err() {
                                 return;
                             }
+                            // A resync (e.g. new `watchNamespaces`) may plan the
+                            // fallback again right away.
+                            fallback_retry_at = None;
                             break;
                         }
                         () = progress_timer.as_mut(), if progress_at.is_some() => {
@@ -1293,7 +1543,45 @@ impl ResourceStore {
                                 invalidator(&store.cluster);
                             }
                             let sanitized = sanitize_watcher_error(&err);
-                            let new_access = watch_error_state(&err, &resource_label);
+                            let new_access = watch_error_state(&err, &resource_label, None);
+                            if let Some(StoreAccessState::Forbidden {
+                                namespace: None, ..
+                            }) = &new_access
+                                && let Some(fb) = fallback.as_ref()
+                                && fallback_retry_at.is_none_or(|at| Instant::now() >= at)
+                            {
+                                match crate::ns_fallback::plan(
+                                    &fb.client,
+                                    &fb.group,
+                                    &fb.resource,
+                                    store.configured_namespaces(),
+                                )
+                                .await
+                                {
+                                    Ok(plan) if !plan.allowed.is_empty() => {
+                                        enter_fallback = Some(plan);
+                                        break;
+                                    }
+                                    Ok(plan) => {
+                                        tracing::info!(
+                                            cluster = %store.cluster,
+                                            kind = %store.kind,
+                                            denied = plan.denied.len(),
+                                            "cluster-wide watch forbidden and no namespace is accessible"
+                                        );
+                                        fallback_retry_at = Some(Instant::now() + FALLBACK_RETRY);
+                                    }
+                                    Err(review_err) => {
+                                        tracing::warn!(
+                                            cluster = %store.cluster,
+                                            kind = %store.kind,
+                                            error = %sanitize_kube_error(&review_err),
+                                            "cannot detect accessible namespaces"
+                                        );
+                                        fallback_retry_at = Some(Instant::now() + FALLBACK_RETRY);
+                                    }
+                                }
+                            }
                             let is_change = match &new_access {
                                 Some(state) => *state != store.access(),
                                 None => last_logged_error.as_deref() != Some(&sanitized),
@@ -1324,9 +1612,131 @@ impl ResourceStore {
         })
     }
 
+    /// Feeds the store from one watcher per namespace of `plan` (05-01), merged
+    /// into one stream. Each namespace's list replaces that namespace's rows when
+    /// it completes; the store is Ready once every namespace is.
+    async fn run_namespace_fallback<K, F>(
+        self: &Arc<Self>,
+        fallback: &NamespaceFallback<K>,
+        plan: &FallbackPlan,
+        project: &Arc<F>,
+        resource_label: &str,
+        resync_rx: &mut watch::Receiver<u64>,
+    ) -> FallbackEnd
+    where
+        K: Resource + serde::de::DeserializeOwned + Clone + std::fmt::Debug + Send + 'static,
+        F: Fn(&K, &str, &CustomColumns) -> Row + Send + Sync + 'static,
+    {
+        self.enter_namespace_scope(plan);
+        let streams = plan.allowed.iter().map(|ns| {
+            let tag = ns.clone();
+            watch_with_backoff(watcher::watcher(
+                (fallback.api_for)(ns),
+                watcher::Config::default(),
+            ))
+            .map(move |item| (tag.clone(), item))
+            .boxed()
+        });
+        let mut merged = futures::stream::select_all(streams);
+        let mut staging: HashMap<String, InitStaging> = HashMap::new();
+        let mut last_logged: HashMap<String, String> = HashMap::new();
+        loop {
+            let item = tokio::select! {
+                changed = resync_rx.changed() => {
+                    return if changed.is_ok() { FallbackEnd::Resync } else { FallbackEnd::Closed };
+                }
+                item = merged.next() => item,
+            };
+            let Some((ns, item)) = item else {
+                return FallbackEnd::Closed;
+            };
+            match item {
+                Ok(Event::Apply(obj)) => {
+                    let row = {
+                        let guard = self.data.read().unwrap_or_else(PoisonError::into_inner);
+                        project(&obj, &self.cluster, &guard.columns)
+                    };
+                    self.upsert_row(row);
+                    self.set_namespace_state(&ns, StoreAccessState::Ready);
+                }
+                Ok(Event::Delete(obj)) => {
+                    if let Some(uid) = obj.meta().uid.as_deref() {
+                        self.remove_uid(uid);
+                    }
+                    self.set_namespace_state(&ns, StoreAccessState::Ready);
+                }
+                Ok(Event::Init) => staging.entry(ns).or_default().clear(),
+                Ok(Event::InitApply(obj)) => {
+                    let cols = self.custom_columns();
+                    let row = project(&obj, &self.cluster, &cols);
+                    staging.entry(ns).or_default().stage(row, &cols);
+                }
+                Ok(Event::InitDone) => {
+                    last_logged.remove(&ns);
+                    let (rows, cols) = staging.entry(ns.clone()).or_default().take();
+                    self.replace_namespace_rows(&ns, rows, &cols);
+                    self.set_namespace_state(&ns, StoreAccessState::Ready);
+                }
+                Err(err) => {
+                    if is_unauthorized_watcher_error(&err)
+                        && let Some(invalidator) = self.client_invalidator()
+                    {
+                        invalidator(&self.cluster);
+                    }
+                    let sanitized = sanitize_watcher_error(&err);
+                    if last_logged.get(&ns) != Some(&sanitized) {
+                        tracing::warn!(
+                            cluster = %self.cluster,
+                            kind = %self.kind,
+                            namespace = %ns,
+                            error = %sanitized,
+                            "namespace watch stream error"
+                        );
+                        last_logged.insert(ns.clone(), sanitized);
+                    }
+                    if let Some(state) = watch_error_state(&err, resource_label, Some(&ns)) {
+                        if let Some(staged) = staging.get_mut(&ns) {
+                            staged.clear();
+                        }
+                        self.set_namespace_state(&ns, state);
+                    }
+                }
+            }
+        }
+    }
+
     fn bump_version(&self) -> u32 {
         self.version.fetch_add(1, Ordering::AcqRel).wrapping_add(1)
     }
+}
+
+/// Access state of a store fed by per-namespace watchers: Ready when every
+/// namespace is; loading (or reconnecting, once synced) while any namespace is
+/// still listing; otherwise the first namespace's failure.
+fn combined_namespace_access(
+    namespaces: &[NamespaceWatch],
+    synced: bool,
+    rows: usize,
+) -> StoreAccessState {
+    if namespaces
+        .iter()
+        .all(|n| n.access == StoreAccessState::Ready)
+    {
+        return StoreAccessState::Ready;
+    }
+    if namespaces.iter().any(|n| n.access.is_syncing()) {
+        return if synced {
+            StoreAccessState::Reconnecting
+        } else {
+            StoreAccessState::Loading {
+                rows_so_far: u32::try_from(rows).unwrap_or(u32::MAX),
+            }
+        };
+    }
+    namespaces
+        .iter()
+        .find(|n| n.access != StoreAccessState::Ready)
+        .map_or(StoreAccessState::Ready, |n| n.access.clone())
 }
 
 /// For every column of `to`, the index of the same path in `from`, or `None`
@@ -1465,7 +1875,11 @@ pub(crate) fn is_unauthorized_watcher_error(err: &watcher::Error) -> bool {
 
 /// Access state to report for a watcher error, or `None` for transient errors the
 /// watcher recovers from by itself (dropped watch connection, expired resource version).
-fn watch_error_state(err: &watcher::Error, resource: &str) -> Option<StoreAccessState> {
+fn watch_error_state(
+    err: &watcher::Error,
+    resource: &str,
+    namespace: Option<&str>,
+) -> Option<StoreAccessState> {
     if is_unauthorized_watcher_error(err) {
         let msg = sanitize_watcher_error(err);
         if let Some(auth_req) = crate::diagnostics::detect_auth_error(&msg) {
@@ -1483,8 +1897,8 @@ fn watch_error_state(err: &watcher::Error, resource: &str) -> Option<StoreAccess
         });
     }
     match err {
-        watcher::Error::InitialListFailed(e) | watcher::Error::WatchStartFailed(e) => {
-            Some(classify_kube_error(e, resource, None).unwrap_or_else(|| {
+        watcher::Error::InitialListFailed(e) | watcher::Error::WatchStartFailed(e) => Some(
+            classify_kube_error(e, resource, namespace).unwrap_or_else(|| {
                 let msg = sanitize_kube_error(e);
                 if let Some(auth_req) = crate::diagnostics::detect_auth_error(&msg) {
                     StoreAccessState::AuthExpired {
@@ -1500,11 +1914,11 @@ fn watch_error_state(err: &watcher::Error, resource: &str) -> Option<StoreAccess
                         partial_rows: None,
                     }
                 }
-            }))
-        }
-        watcher::Error::WatchFailed(e) => classify_kube_error(e, resource, None),
+            }),
+        ),
+        watcher::Error::WatchFailed(e) => classify_kube_error(e, resource, namespace),
         watcher::Error::WatchError(status) => {
-            classify_kube_error(&kube::Error::Api(status.clone()), resource, None)
+            classify_kube_error(&kube::Error::Api(status.clone()), resource, namespace)
         }
         watcher::Error::NoResourceVersion => Some(StoreAccessState::Error {
             message: "resource version not found in watch stream".to_owned(),
@@ -2130,6 +2544,10 @@ pub struct ClusterManager {
     stores: StoreMap,
     custom_columns: ColumnMap,
     discovery_cache: DiscoveryMap,
+    /// Per-context namespaces to watch when a cluster-wide watch is forbidden
+    /// (05-01); see [`Self::set_watch_namespaces`].
+    watch_namespaces: WatchNamespacesMap,
+    namespaced_resources: NamespacedMap,
     next_sub_id: Arc<AtomicU32>,
     /// Per-context clients of the metrics pollers (02-01), built without kube's
     /// default retry layer: that layer retries 503 up to 15 times with
@@ -2163,6 +2581,8 @@ impl ClusterManager {
             stores: Arc::new(RwLock::new(HashMap::new())),
             custom_columns: Arc::new(RwLock::new(HashMap::new())),
             discovery_cache: Arc::new(RwLock::new(HashMap::new())),
+            watch_namespaces: Arc::new(RwLock::new(HashMap::new())),
+            namespaced_resources: Arc::new(RwLock::new(HashMap::new())),
             next_sub_id: Arc::new(AtomicU32::new(1)),
             foreground: Arc::new(watch::channel(true).0),
             foreground_mutex: Arc::new(tokio::sync::Mutex::new(())),
@@ -2282,8 +2702,38 @@ impl ClusterManager {
                 let mut guard = clients.lock().unwrap_or_else(PoisonError::into_inner);
                 guard.remove(ctx);
             }));
+            store.set_watch_namespaces_map(Arc::clone(&self.watch_namespaces));
             store
         }))
+    }
+
+    /// Sets the namespaces to watch one by one for `context` when a cluster-wide
+    /// list/watch is forbidden (05-01; the context's `watchNamespaces` setting).
+    /// Empty means "detect". When the list changes, the context's stores that
+    /// already run a per-namespace fallback re-plan it.
+    pub fn set_watch_namespaces(&self, context: &str, namespaces: Vec<String>) {
+        let changed = {
+            let mut guard = self
+                .watch_namespaces
+                .write()
+                .unwrap_or_else(PoisonError::into_inner);
+            let previous = guard.get(context).cloned().unwrap_or_default();
+            if namespaces.is_empty() {
+                guard.remove(context);
+            } else {
+                guard.insert(context.to_owned(), namespaces.clone());
+            }
+            previous != namespaces
+        };
+        if !changed {
+            return;
+        }
+        let stores = self.stores.read().unwrap_or_else(PoisonError::into_inner);
+        for ((ctx, _), store) in stores.iter() {
+            if ctx == context && store.wants_fallback_replan() {
+                store.resync();
+            }
+        }
     }
 
     /// Returns the existing [`ResourceStore`] for `(cluster, kind)` if present.
@@ -2417,11 +2867,19 @@ impl ClusterManager {
         };
 
         let mut all_resources = Vec::new();
+        let mut namespaced = HashSet::new();
         for group in discovery.groups() {
-            for (ar, _caps) in group.recommended_resources() {
+            for (ar, caps) in group.recommended_resources() {
+                if caps.scope == kube::discovery::Scope::Namespaced {
+                    namespaced.insert(format!("{}/{}", ar.group, ar.plural));
+                }
                 all_resources.push(ar);
             }
         }
+        self.namespaced_resources
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(cluster.to_owned(), namespaced);
 
         let found = find_matching_resource_with_version(&all_resources, api_version, kind);
 
@@ -2454,47 +2912,47 @@ impl ClusterManager {
         match builtin {
             "Pod" => store.start_watcher_once(|s| s.spawn_pod_watcher(client)),
             "Deployment" => store.start_watcher_once(|s| {
-                s.spawn_typed_watcher(client, "deployments", |d: &Deployment, cl, cols| {
+                s.spawn_namespaced_watcher(client, "deployments", |d: &Deployment, cl, cols| {
                     with_custom_columns(crate::projection::project_deployment(d, cl), d, cols)
                 })
             }),
             "StatefulSet" => store.start_watcher_once(|s| {
-                s.spawn_typed_watcher(client, "statefulsets", |ss: &StatefulSet, cl, cols| {
+                s.spawn_namespaced_watcher(client, "statefulsets", |ss: &StatefulSet, cl, cols| {
                     with_custom_columns(project_stateful_set(ss, cl), ss, cols)
                 })
             }),
             "DaemonSet" => store.start_watcher_once(|s| {
-                s.spawn_typed_watcher(client, "daemonsets", |ds: &DaemonSet, cl, cols| {
+                s.spawn_namespaced_watcher(client, "daemonsets", |ds: &DaemonSet, cl, cols| {
                     with_custom_columns(project_daemon_set(ds, cl), ds, cols)
                 })
             }),
             "Job" => store.start_watcher_once(|s| {
-                s.spawn_typed_watcher(client, "jobs", |j: &Job, cl, cols| {
+                s.spawn_namespaced_watcher(client, "jobs", |j: &Job, cl, cols| {
                     with_custom_columns(crate::projection::project_job(j, cl), j, cols)
                 })
             }),
             "CronJob" => store.start_watcher_once(|s| {
-                s.spawn_typed_watcher(client, "cronjobs", |cj: &CronJob, cl, cols| {
+                s.spawn_namespaced_watcher(client, "cronjobs", |cj: &CronJob, cl, cols| {
                     with_custom_columns(project_cron_job(cj, cl), cj, cols)
                 })
             }),
             "Service" => store.start_watcher_once(|s| {
-                s.spawn_typed_watcher(client, "services", |svc: &Service, cl, cols| {
+                s.spawn_namespaced_watcher(client, "services", |svc: &Service, cl, cols| {
                     with_custom_columns(crate::detail::project_service(svc, cl), svc, cols)
                 })
             }),
             "Ingress" => store.start_watcher_once(|s| {
-                s.spawn_typed_watcher(client, "ingresses", |ing: &Ingress, cl, cols| {
+                s.spawn_namespaced_watcher(client, "ingresses", |ing: &Ingress, cl, cols| {
                     with_custom_columns(project_ingress(ing, cl), ing, cols)
                 })
             }),
             "ConfigMap" => store.start_watcher_once(|s| {
-                s.spawn_typed_watcher(client, "configmaps", |cm: &ConfigMap, cl, cols| {
+                s.spawn_namespaced_watcher(client, "configmaps", |cm: &ConfigMap, cl, cols| {
                     with_custom_columns(crate::detail::project_config_map(cm, cl), cm, cols)
                 })
             }),
             "Secret" => store.start_watcher_once(|s| {
-                s.spawn_typed_watcher(client, "secrets", |sec: &Secret, cl, cols| {
+                s.spawn_namespaced_watcher(client, "secrets", |sec: &Secret, cl, cols| {
                     with_custom_columns_secret(crate::detail::project_secret(sec, cl), sec, cols)
                 })
             }),
@@ -2509,12 +2967,12 @@ impl ClusterManager {
                 })
             }),
             "Event" => store.start_watcher_once(|s| {
-                s.spawn_typed_watcher(client, "events", |ev: &K8sEvent, cl, cols| {
+                s.spawn_namespaced_watcher(client, "events", |ev: &K8sEvent, cl, cols| {
                     with_custom_columns(crate::detail::project_event(ev, cl), ev, cols)
                 })
             }),
             "PersistentVolumeClaim" => store.start_watcher_once(|s| {
-                s.spawn_typed_watcher(
+                s.spawn_namespaced_watcher(
                     client,
                     "persistentvolumeclaims",
                     |pvc: &PersistentVolumeClaim, cl, cols| {
@@ -2523,21 +2981,25 @@ impl ClusterManager {
                 )
             }),
             "ReplicaSet" => store.start_watcher_once(|s| {
-                s.spawn_typed_watcher(client, "replicasets", |rs: &ReplicaSet, cl, cols| {
+                s.spawn_namespaced_watcher(client, "replicasets", |rs: &ReplicaSet, cl, cols| {
                     with_custom_columns(crate::builtin_kinds::project_replica_set(rs, cl), rs, cols)
                 })
             }),
             "EndpointSlice" => store.start_watcher_once(|s| {
-                s.spawn_typed_watcher(client, "endpointslices", |eps: &EndpointSlice, cl, cols| {
-                    with_custom_columns(
-                        crate::builtin_kinds::project_endpoint_slice(eps, cl),
-                        eps,
-                        cols,
-                    )
-                })
+                s.spawn_namespaced_watcher(
+                    client,
+                    "endpointslices",
+                    |eps: &EndpointSlice, cl, cols| {
+                        with_custom_columns(
+                            crate::builtin_kinds::project_endpoint_slice(eps, cl),
+                            eps,
+                            cols,
+                        )
+                    },
+                )
             }),
             "HorizontalPodAutoscaler" => store.start_watcher_once(|s| {
-                s.spawn_typed_watcher(
+                s.spawn_namespaced_watcher(
                     client,
                     "horizontalpodautoscalers",
                     |hpa: &HorizontalPodAutoscaler, cl, cols| {
@@ -2546,7 +3008,7 @@ impl ClusterManager {
                 )
             }),
             "PodDisruptionBudget" => store.start_watcher_once(|s| {
-                s.spawn_typed_watcher(
+                s.spawn_namespaced_watcher(
                     client,
                     "poddisruptionbudgets",
                     |pdb: &PodDisruptionBudget, cl, cols| {
@@ -2555,16 +3017,20 @@ impl ClusterManager {
                 )
             }),
             "ResourceQuota" => store.start_watcher_once(|s| {
-                s.spawn_typed_watcher(client, "resourcequotas", |rq: &ResourceQuota, cl, cols| {
-                    with_custom_columns(
-                        crate::builtin_kinds::project_resource_quota(rq, cl),
-                        rq,
-                        cols,
-                    )
-                })
+                s.spawn_namespaced_watcher(
+                    client,
+                    "resourcequotas",
+                    |rq: &ResourceQuota, cl, cols| {
+                        with_custom_columns(
+                            crate::builtin_kinds::project_resource_quota(rq, cl),
+                            rq,
+                            cols,
+                        )
+                    },
+                )
             }),
             "LimitRange" => store.start_watcher_once(|s| {
-                s.spawn_typed_watcher(client, "limitranges", |lr: &LimitRange, cl, cols| {
+                s.spawn_namespaced_watcher(client, "limitranges", |lr: &LimitRange, cl, cols| {
                     with_custom_columns(crate::builtin_kinds::project_limit_range(lr, cl), lr, cols)
                 })
             }),
@@ -2587,7 +3053,7 @@ impl ClusterManager {
                 })
             }),
             "Lease" => store.start_watcher_once(|s| {
-                s.spawn_typed_watcher(client, "leases", |l: &Lease, cl, cols| {
+                s.spawn_namespaced_watcher(client, "leases", |l: &Lease, cl, cols| {
                     with_custom_columns(crate::builtin_kinds::project_lease(l, cl), l, cols)
                 })
             }),
@@ -2623,7 +3089,7 @@ impl ClusterManager {
                 )
             }),
             "ServiceAccount" => store.start_watcher_once(|s| {
-                s.spawn_typed_watcher(
+                s.spawn_namespaced_watcher(
                     client,
                     "serviceaccounts",
                     |sa: &ServiceAccount, cl, cols| {
@@ -2636,7 +3102,7 @@ impl ClusterManager {
                 )
             }),
             "Role" => store.start_watcher_once(|s| {
-                s.spawn_typed_watcher(client, "roles", |r: &Role, cl, cols| {
+                s.spawn_namespaced_watcher(client, "roles", |r: &Role, cl, cols| {
                     with_custom_columns(crate::builtin_kinds::project_role(r, cl), r, cols)
                 })
             }),
@@ -2650,7 +3116,7 @@ impl ClusterManager {
                 })
             }),
             "RoleBinding" => store.start_watcher_once(|s| {
-                s.spawn_typed_watcher(client, "rolebindings", |rb: &RoleBinding, cl, cols| {
+                s.spawn_namespaced_watcher(client, "rolebindings", |rb: &RoleBinding, cl, cols| {
                     with_custom_columns(
                         crate::builtin_kinds::project_role_binding(rb, cl),
                         rb,
@@ -2672,13 +3138,17 @@ impl ClusterManager {
                 )
             }),
             "NetworkPolicy" => store.start_watcher_once(|s| {
-                s.spawn_typed_watcher(client, "networkpolicies", |np: &NetworkPolicy, cl, cols| {
-                    with_custom_columns(
-                        crate::builtin_kinds::project_network_policy(np, cl),
-                        np,
-                        cols,
-                    )
-                })
+                s.spawn_namespaced_watcher(
+                    client,
+                    "networkpolicies",
+                    |np: &NetworkPolicy, cl, cols| {
+                        with_custom_columns(
+                            crate::builtin_kinds::project_network_policy(np, cl),
+                            np,
+                            cols,
+                        )
+                    },
+                )
             }),
             "MutatingWebhookConfiguration" => store.start_watcher_once(|s| {
                 s.spawn_typed_watcher(
@@ -2744,11 +3214,29 @@ impl ClusterManager {
         client: kube::Client,
         ar: ApiResource,
     ) -> StartOutcome {
-        let api = kube::Api::<DynamicObject>::all_with(client, &ar);
+        let api = kube::Api::<DynamicObject>::all_with(client.clone(), &ar);
         let ar_kind = ar.kind.clone();
         let plural = ar.plural.clone();
+        let namespaced = self
+            .namespaced_resources
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&store.cluster)
+            .is_some_and(|set| set.contains(&format!("{}/{}", ar.group, ar.plural)));
+        let fallback = namespaced.then(|| {
+            let ns_client = client.clone();
+            let ns_ar = ar.clone();
+            NamespaceFallback {
+                client,
+                group: ar.group.clone(),
+                resource: ar.plural.clone(),
+                api_for: Arc::new(move |ns: &str| {
+                    kube::Api::<DynamicObject>::namespaced_with(ns_client.clone(), ns, &ns_ar)
+                }) as NamespacedApiFn<DynamicObject>,
+            }
+        });
         store.start_watcher_once(move |s| {
-            s.spawn_watcher_from_api(api, plural, move |obj, cl, cols| {
+            s.spawn_watcher_from_api(api, plural, fallback, move |obj, cl, cols| {
                 with_custom_columns(
                     crate::ecosystem::project_ecosystem_object(obj, cl, &ar_kind),
                     obj,
@@ -3172,6 +3660,7 @@ impl ClusterManager {
                     rows: u32::try_from(guard.rows.len()).unwrap_or(u32::MAX),
                     metrics: store.metrics(),
                     paused: store.is_paused(),
+                    scope: store.scope(),
                 });
                 cluster_rows.extend(guard.rows.values().cloned());
             }
@@ -3350,6 +3839,7 @@ impl ClusterManager {
                 rows: u32::try_from(guard.rows.len()).unwrap_or(u32::MAX),
                 metrics: store.metrics(),
                 paused: store.is_paused(),
+                scope: store.scope(),
             })
             .collect();
 
@@ -4369,7 +4859,7 @@ mod tests {
         let err = watcher::Error::WatchError(status);
         assert!(is_unauthorized_watcher_error(&err));
 
-        let access_state = watch_error_state(&err, "pods");
+        let access_state = watch_error_state(&err, "pods", None);
         assert!(matches!(
             access_state,
             Some(StoreAccessState::Error { ref message, .. }) if message.contains("Unauthorized")
@@ -4556,20 +5046,20 @@ mod tests {
         };
         let forbidden = watcher::Error::InitialListFailed(kube::Error::Api(status(403)));
         assert!(matches!(
-            watch_error_state(&forbidden, "pods"),
+            watch_error_state(&forbidden, "pods", None),
             Some(StoreAccessState::Forbidden { message, .. }) if message == "No permission to list pods"
         ));
         assert_eq!(
-            watch_error_state(&watcher::Error::WatchError(status(410)), "pods"),
+            watch_error_state(&watcher::Error::WatchError(status(410)), "pods", None),
             None
         );
         assert!(matches!(
-            watch_error_state(&watcher::Error::WatchError(status(403)), "pods"),
+            watch_error_state(&watcher::Error::WatchError(status(403)), "pods", None),
             Some(StoreAccessState::Forbidden { .. })
         ));
         let server_error = watcher::Error::InitialListFailed(kube::Error::Api(status(500)));
         assert!(matches!(
-            watch_error_state(&server_error, "pods"),
+            watch_error_state(&server_error, "pods", None),
             Some(StoreAccessState::Error { .. })
         ));
     }
@@ -5282,6 +5772,168 @@ mod tests {
         store.list_failed(&mut staging, forbidden.clone());
         assert_eq!(store.access(), forbidden);
         assert_eq!(store.row_count(), 10);
+    }
+
+    fn fallback_plan(allowed: &[&str], denied: &[&str]) -> FallbackPlan {
+        FallbackPlan {
+            source: crate::api::NamespaceSource::Configured,
+            allowed: allowed.iter().map(|s| (*s).to_owned()).collect(),
+            denied: denied.iter().map(|s| (*s).to_owned()).collect(),
+            truncated: false,
+        }
+    }
+
+    fn ns_rows(store: &ResourceStore, ns: &str, uids: &[&str]) -> BTreeMap<String, Row> {
+        let cols = store.custom_columns();
+        uids.iter()
+            .map(|uid| {
+                let pod = synthetic_pod(uid, ns, uid);
+                (
+                    (*uid).to_owned(),
+                    project_pod_with_columns(&pod, &store.cluster, &cols),
+                )
+            })
+            .collect()
+    }
+
+    fn namespaces_of(store: &ResourceStore) -> Vec<String> {
+        let (rows, _) = store.snapshot_rows();
+        let mut out: Vec<String> = rows.into_iter().filter_map(|r| r.namespace).collect();
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn namespace_fallback_merges_namespaces_and_is_ready_when_all_are() {
+        let store = ResourceStore::new("c", "Pod");
+        store.enter_namespace_scope(&fallback_plan(&["dev", "qa"], &["prod"]));
+        let scope = store.scope().expect("restricted scope");
+        assert_eq!(scope.denied, vec!["prod".to_owned()]);
+        assert_eq!(scope.namespaces.len(), 2);
+        assert!(store.access().is_loading());
+
+        let cols = store.custom_columns();
+        store.replace_namespace_rows("dev", ns_rows(&store, "dev", &["d1", "d2"]), &cols);
+        store.set_namespace_state("dev", StoreAccessState::Ready);
+        assert!(
+            store.access().is_loading(),
+            "qa still listing: not Ready yet"
+        );
+        store.replace_namespace_rows("qa", ns_rows(&store, "qa", &["q1"]), &cols);
+        store.set_namespace_state("qa", StoreAccessState::Ready);
+        assert_eq!(store.access(), StoreAccessState::Ready);
+        assert_eq!(namespaces_of(&store), vec!["dev", "dev", "qa"]);
+
+        // A re-list of `dev` replaces only dev's rows.
+        store.replace_namespace_rows("dev", ns_rows(&store, "dev", &["d2"]), &cols);
+        assert_eq!(namespaces_of(&store), vec!["dev", "qa"]);
+    }
+
+    #[test]
+    fn namespace_fallback_reports_one_failing_namespace() {
+        let store = ResourceStore::new("c", "Pod");
+        store.enter_namespace_scope(&fallback_plan(&["dev", "qa"], &[]));
+        store.set_namespace_state("dev", StoreAccessState::Ready);
+        let forbidden = StoreAccessState::Forbidden {
+            resource: "pods".to_owned(),
+            namespace: Some("qa".to_owned()),
+            message: "No permission to list pods in qa".to_owned(),
+        };
+        store.set_namespace_state("qa", forbidden.clone());
+        assert_eq!(store.access(), forbidden);
+        let scope = store.scope().expect("restricted scope");
+        assert_eq!(scope.namespaces[0].access, StoreAccessState::Ready);
+        assert_eq!(scope.namespaces[1].access, forbidden);
+        // Unknown namespaces are ignored.
+        store.set_namespace_state("other", StoreAccessState::Ready);
+        assert_eq!(store.access(), forbidden);
+    }
+
+    #[test]
+    fn entering_namespace_scope_drops_rows_outside_it_and_leaving_clears_it() {
+        let store = ResourceStore::new("c", "Pod");
+        let mut staging = InitStaging::default();
+        // Rows of `default` from an earlier cluster-wide list.
+        init_apply_range(&store, &mut staging, 0..3, Instant::now());
+        store.init_done(&mut staging);
+        let cols = store.custom_columns();
+        store.replace_namespace_rows("dev", ns_rows(&store, "dev", &["d1"]), &cols);
+        store.enter_namespace_scope(&fallback_plan(&["dev"], &[]));
+        assert_eq!(namespaces_of(&store), vec!["dev"]);
+        assert_eq!(
+            store.access(),
+            StoreAccessState::Reconnecting,
+            "a synced store re-lists as reconnecting"
+        );
+        store.leave_namespace_scope();
+        assert!(store.scope().is_none());
+    }
+
+    #[test]
+    fn changing_watch_namespaces_resyncs_restricted_and_forbidden_stores() {
+        let manager = dummy_manager(Duration::from_secs(60));
+        let forbidden = manager.get_or_create_store("c", "Pod");
+        forbidden.set_access(StoreAccessState::Forbidden {
+            resource: "pods".to_owned(),
+            namespace: None,
+            message: "No permission to list pods".to_owned(),
+        });
+        let restricted = manager.get_or_create_store("c", "Deployment");
+        restricted.enter_namespace_scope(&fallback_plan(&["dev"], &[]));
+        let ready = manager.get_or_create_store("c", "Service");
+        ready.set_access(StoreAccessState::Ready);
+        let other_context = manager.get_or_create_store("d", "Pod");
+        other_context.set_access(forbidden.access());
+
+        let rx = |s: &ResourceStore| s.resync_tx.subscribe();
+        let (rx_forbidden, rx_restricted, rx_ready, rx_other) = (
+            rx(&forbidden),
+            rx(&restricted),
+            rx(&ready),
+            rx(&other_context),
+        );
+        manager.set_watch_namespaces("c", vec!["dev".to_owned()]);
+        assert!(rx_forbidden.has_changed().expect("open"));
+        assert!(rx_restricted.has_changed().expect("open"));
+        assert!(!rx_ready.has_changed().expect("open"));
+        assert!(!rx_other.has_changed().expect("open"));
+
+        // An unchanged list does not resync again.
+        let rx_again = rx(&forbidden);
+        manager.set_watch_namespaces("c", vec!["dev".to_owned()]);
+        assert!(!rx_again.has_changed().expect("open"));
+    }
+
+    #[test]
+    fn combined_access_prefers_syncing_over_failures() {
+        let ns = |name: &str, access: StoreAccessState| NamespaceWatch {
+            namespace: name.to_owned(),
+            access,
+        };
+        let err = StoreAccessState::Error {
+            message: "boom".to_owned(),
+            partial_rows: None,
+        };
+        assert_eq!(
+            combined_namespace_access(&[], false, 0),
+            StoreAccessState::Ready
+        );
+        assert_eq!(
+            combined_namespace_access(
+                &[ns("a", err.clone()), ns("b", StoreAccessState::CONNECTING)],
+                false,
+                4
+            ),
+            StoreAccessState::Loading { rows_so_far: 4 }
+        );
+        assert_eq!(
+            combined_namespace_access(
+                &[ns("a", StoreAccessState::Ready), ns("b", err.clone())],
+                true,
+                4
+            ),
+            err
+        );
     }
 
     #[test]

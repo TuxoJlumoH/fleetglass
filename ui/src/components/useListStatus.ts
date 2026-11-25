@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { usePodsStore } from "../stores/pods";
-import { type AccessNotice, accessNotices, loadingProgress } from "./podAccess";
+import {
+  type AccessNotice,
+  accessNotices,
+  loadingProgress,
+  type RestrictedScope,
+  restrictedScopes,
+} from "./podAccess";
 import { summaryCounts } from "./statusTone";
 
 /** A fresh query that answers within this time never flashes "Connecting…". */
@@ -12,6 +18,8 @@ export interface ListStatus {
   /** A failed IPC call with no access states: the error is shown, nothing is "Connecting". */
   ipcFailed: boolean;
   notices: AccessNotice[];
+  /** Stores watched namespace by namespace after a cluster-wide 403 (05-01). */
+  restricted: RestrictedScope[];
   metricsNotInstalled: boolean;
   metricsForbidden: boolean;
   hasNotices: boolean;
@@ -62,13 +70,18 @@ export function useListStatus(kind: string): ListStatus {
     () => (ipcFailed || awaitingFirstAnswer ? [] : accessNotices(queried, access)),
     [ipcFailed, awaitingFirstAnswer, queried, access],
   );
+  const restricted = useMemo(
+    () => (ipcFailed ? [] : restrictedScopes(queried, access)),
+    [ipcFailed, queried, access],
+  );
   const metricsState = (state: "notInstalled" | "forbidden") =>
     !ipcFailed &&
     !awaitingFirstAnswer &&
     access.some((a) => queried.includes(a.cluster) && a.kind === kind && a.metrics?.state === state);
   const metricsNotInstalled = metricsState("notInstalled");
   const metricsForbidden = metricsState("forbidden");
-  const hasNotices = notices.length > 0 || metricsForbidden || metricsNotInstalled;
+  const hasNotices =
+    notices.length > 0 || restricted.length > 0 || metricsForbidden || metricsNotInstalled;
   const anyReady = access.some((a) => a.access.state === "ready");
   const progress = useMemo(() => (ipcFailed ? null : loadingProgress(access)), [ipcFailed, access]);
 
@@ -87,6 +100,7 @@ export function useListStatus(kind: string): ListStatus {
     queried,
     ipcFailed,
     notices,
+    restricted,
     metricsNotInstalled,
     metricsForbidden,
     hasNotices,

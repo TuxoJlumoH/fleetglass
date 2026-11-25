@@ -163,6 +163,7 @@ impl AppState {
         settings: Arc<SettingsStore>,
         audit: Arc<AuditLogStore>,
     ) -> Self {
+        sync_watch_namespaces(&manager, &settings);
         Self {
             manager,
             settings,
@@ -1104,6 +1105,13 @@ async fn get_context_settings(
     Ok(state.settings.get(&context))
 }
 
+/// Hands every context's `watchNamespaces` setting (05-01) to the manager.
+fn sync_watch_namespaces(manager: &ClusterManager, settings: &SettingsStore) {
+    for (context, ctx_settings) in settings.get_all() {
+        manager.set_watch_namespaces(&context, ctx_settings.watch_namespaces);
+    }
+}
+
 /// Persists updated UI and write-safety settings for `context`.
 #[tauri::command]
 #[specta::specta]
@@ -1113,14 +1121,19 @@ async fn update_context_settings(
     settings: ContextSettings,
 ) -> Result<ContextSettings, IpcError> {
     let store = Arc::clone(&state.settings);
-    run_blocking(
+    let saved = run_blocking(
         "update_context_settings",
         move || -> fleetglass_core::Result<_> {
             store.set(context.clone(), settings.clone())?;
-            Ok(settings)
+            Ok((context, settings))
         },
     )
-    .await
+    .await?;
+    let (context, settings) = saved;
+    state
+        .manager
+        .set_watch_namespaces(&context, settings.watch_namespaces.clone());
+    Ok(settings)
 }
 
 /// Request to spawn an external terminal emulator (`04-10`).
@@ -2599,10 +2612,12 @@ async fn reload_team_settings(
     path: String,
 ) -> Result<TeamSettingsSummary, IpcError> {
     let store = Arc::clone(&state.settings);
-    run_blocking("reload_team_settings", move || {
+    let summary = run_blocking("reload_team_settings", move || {
         fleetglass_core::team_settings::merge_team_settings(&store, Path::new(&path))
     })
-    .await
+    .await?;
+    sync_watch_namespaces(&state.manager, &state.settings);
+    Ok(summary)
 }
 
 /// Maximum number of plugins returned by [`list_plugins`].

@@ -266,7 +266,7 @@ export function MobileResourceList({ kind, initialTextFilter, remoteOps = true }
   );
 
   const status = useListStatus(kind);
-  const { queried, notices, metricsForbidden, metricsNotInstalled, hasNotices, progress, ipcFailed } =
+  const { queried, notices, restricted, metricsForbidden, metricsNotInstalled, hasNotices, progress, ipcFailed } =
     status;
   const statusFilter = querySpec.statuses;
   const noun = kindNoun(kind);
@@ -585,6 +585,19 @@ export function MobileResourceList({ kind, initialTextFilter, remoteOps = true }
       ) : (
         hasNotices && (
           <div className="pod-table__notices" data-testid="pod-cluster-notices">
+            {restricted.map((r) => (
+              <p
+                key={`restricted\n${r.cluster}`}
+                role="status"
+                className="pod-table__notice pod-table__notice--scope"
+                data-testid="restricted-scope"
+                data-cluster={r.cluster}
+                title={r.detail}
+              >
+                <span className="pill warn">{r.label}</span>
+                <span className="visually-hidden"> {r.detail}</span>
+              </p>
+            ))}
             {notices.map((n) => (
               <p
                 key={`${n.cluster}\n${n.text}`}

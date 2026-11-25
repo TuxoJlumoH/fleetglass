@@ -860,6 +860,12 @@ export type ContextSettings_Deserialize = {
 	protected: boolean,
 	pinned: boolean,
 	unlockedUntil?: number | null,
+	/**
+	 *  Namespaces to watch one by one when a cluster-wide list/watch is forbidden
+	 *  (05-01). Empty: detect them (namespace list + access reviews, else the
+	 *  kubeconfig context's namespace). Omitted when empty.
+	 */
+	watchNamespaces?: string[],
 };
 
 /**  Per-context UI and safety preferences persisted by [`crate::settings::SettingsStore`]. */
@@ -870,6 +876,12 @@ export type ContextSettings_Serialize = {
 	protected: boolean,
 	pinned: boolean,
 	unlockedUntil?: number,
+	/**
+	 *  Namespaces to watch one by one when a cluster-wide list/watch is forbidden
+	 *  (05-01). Empty: detect them (namespace list + access reviews, else the
+	 *  kubeconfig context's namespace). Omitted when empty.
+	 */
+	watchNamespaces?: string[],
 };
 
 /**  Request to create a short-lived host-namespace debug shell on a node (`04-03d`). */
@@ -1299,6 +1311,33 @@ export type MuxLogLine = {
 	text: string,
 	/**  `true` when the trimmed text parses as a JSON object. */
 	json: boolean,
+};
+
+/**  Origin of the namespaces a restricted store watches (05-01). */
+export type NamespaceSource = 
+/**  The context's `watchNamespaces` setting ([`ContextSettings::watch_namespaces`]). */
+"configured" | 
+/**  Listing namespaces was allowed; each was checked with a `SelfSubjectRulesReview`. */
+"discovered" | 
+/**
+ *  Listing namespaces was forbidden too: the kubeconfig context's namespace
+ *  (or `default`) was checked as a last resort.
+ */
+"contextNamespace";
+
+/**  State of one per-namespace watcher of a [`WatchScope`]. */
+export type NamespaceWatch = NamespaceWatch_Serialize | NamespaceWatch_Deserialize;
+
+/**  State of one per-namespace watcher of a [`WatchScope`]. */
+export type NamespaceWatch_Deserialize = {
+	namespace: string,
+	access: StoreAccessState_Deserialize,
+};
+
+/**  State of one per-namespace watcher of a [`WatchScope`]. */
+export type NamespaceWatch_Serialize = {
+	namespace: string,
+	access: StoreAccessState_Serialize,
 };
 
 /**  Overview data for all connected clusters. */
@@ -1898,6 +1937,12 @@ export type StoreAccess_Deserialize = {
 	 *  optional on both sides of the IPC.
 	 */
 	paused?: boolean,
+	/**
+	 *  Set when the cluster-wide list/watch was forbidden (HTTP 403) and the store
+	 *  is fed by per-namespace watchers instead (05-01): rows cover only these
+	 *  namespaces. `None` for a normal cluster-wide watch. Omitted when `None`.
+	 */
+	scope?: WatchScope_Deserialize | null,
 };
 
 /**  Access state of one `(cluster, kind)` watch store, reported with each [`Page`]. */
@@ -1922,6 +1967,12 @@ export type StoreAccess_Serialize = {
 	 *  optional on both sides of the IPC.
 	 */
 	paused?: boolean,
+	/**
+	 *  Set when the cluster-wide list/watch was forbidden (HTTP 403) and the store
+	 *  is fed by per-namespace watchers instead (05-01): rows cover only these
+	 *  namespaces. `None` for a normal cluster-wide watch. Omitted when `None`.
+	 */
+	scope?: WatchScope_Serialize,
 };
 
 /**  Summary returned after reloading team settings. */
@@ -2044,6 +2095,39 @@ export type WarningEvent_Serialize = {
 	count: number,
 	lastTimestamp: string | null,
 	age: string,
+};
+
+/**  Restricted scope of a store whose cluster-wide watch is forbidden (05-01). */
+export type WatchScope = WatchScope_Serialize | WatchScope_Deserialize;
+
+/**  Restricted scope of a store whose cluster-wide watch is forbidden (05-01). */
+export type WatchScope_Deserialize = {
+	/**
+	 *  Namespaces watched one by one, sorted by name, each with its own state.
+	 *  Bounded by [`crate::ns_fallback::MAX_FALLBACK_NAMESPACES`].
+	 */
+	namespaces: NamespaceWatch_Deserialize[],
+	/**  Where the namespace candidates came from. */
+	source: NamespaceSource,
+	/**  Candidates whose rules review denied `list` or `watch`, sorted; not watched. */
+	denied: string[],
+	/**  `true` when there were more candidates than the cap and some were not checked. */
+	truncated: boolean,
+};
+
+/**  Restricted scope of a store whose cluster-wide watch is forbidden (05-01). */
+export type WatchScope_Serialize = {
+	/**
+	 *  Namespaces watched one by one, sorted by name, each with its own state.
+	 *  Bounded by [`crate::ns_fallback::MAX_FALLBACK_NAMESPACES`].
+	 */
+	namespaces: NamespaceWatch_Serialize[],
+	/**  Where the namespace candidates came from. */
+	source: NamespaceSource,
+	/**  Candidates whose rules review denied `list` or `watch`, sorted; not watched. */
+	denied: string[],
+	/**  `true` when there were more candidates than the cap and some were not checked. */
+	truncated: boolean,
 };
 
 /**  Target of a multiplexed workload log stream. */

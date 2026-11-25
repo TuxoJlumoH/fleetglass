@@ -149,8 +149,19 @@ fn access_summary(manager: &ClusterManager, page: &Page) -> Option<String> {
         .access
         .iter()
         .filter_map(|a| {
+            // A per-namespace fallback (05-01) is Ready yet covers only a subset.
+            let scope_note = a.scope.as_ref().map(|scope| {
+                let watched: Vec<&str> =
+                    scope.namespaces.iter().map(|n| n.namespace.as_str()).collect();
+                format!(
+                    "restricted to namespaces {} (cluster-wide watch forbidden); rows from other namespaces are missing",
+                    watched.join(", ")
+                )
+            });
             let note = match &a.access {
-                StoreAccessState::Ready => return None,
+                StoreAccessState::Ready => {
+                    return scope_note.map(|n| format!("- {} in {}: {n}", a.kind, a.cluster));
+                }
                 StoreAccessState::Loading { rows_so_far } => format!(
                     "still loading (initial list not finished, {rows_so_far} rows so far); retry shortly"
                 ),
@@ -179,6 +190,10 @@ fn access_summary(manager: &ClusterManager, page: &Page) -> Option<String> {
                     login_command,
                     ..
                 } => format!("auth expired: {hint} (command: {login_command})"),
+            };
+            let note = match scope_note {
+                Some(scope_note) => format!("{note}; {scope_note}"),
+                None => note,
             };
             Some(format!("- {} in {}: {note}", a.kind, a.cluster))
         })
@@ -1456,8 +1471,32 @@ mod tests {
             rows: 0,
             metrics: None,
             paused: false,
+            scope: None,
         });
         assert_eq!(access_summary(&manager, &page), None);
+
+        // Ready but restricted to a namespace subset (05-01).
+        page.access[0].scope = Some(crate::api::WatchScope {
+            namespaces: ["dev", "qa"]
+                .into_iter()
+                .map(|n| crate::api::NamespaceWatch {
+                    namespace: n.to_owned(),
+                    access: StoreAccessState::Ready,
+                })
+                .collect(),
+            source: crate::api::NamespaceSource::Configured,
+            denied: Vec::new(),
+            truncated: false,
+        });
+        let note = access_summary(&manager, &page).expect("note");
+        assert!(
+            note.contains(
+                "Pod in c: restricted to namespaces dev, qa (cluster-wide watch forbidden)"
+            ),
+            "{note}"
+        );
+        page.access[0].scope = None;
+
         page.access[0].access = StoreAccessState::Loading { rows_so_far: 7 };
         assert!(
             access_summary(&manager, &page)

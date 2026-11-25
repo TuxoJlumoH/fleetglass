@@ -1531,6 +1531,7 @@ mod tests {
                     rows: 0,
                     metrics: None,
                     paused: false,
+                    scope: None,
                 })
                 .collect(),
             status_counts: fleetglass_core::api::StatusCounts::default(),

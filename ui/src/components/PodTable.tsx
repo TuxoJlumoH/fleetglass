@@ -397,6 +397,7 @@ export function PodTable({ kind = "Pod", initialTextFilter }: PodTableProps = {}
     queried,
     ipcFailed,
     notices,
+    restricted,
     metricsNotInstalled,
     metricsForbidden,
     hasNotices,
@@ -996,6 +997,19 @@ export function PodTable({ kind = "Pod", initialTextFilter }: PodTableProps = {}
           ) : (
             hasNotices && (
               <div className="pod-table__notices" data-testid="pod-cluster-notices">
+                {restricted.map((r) => (
+                  <p
+                    key={`restricted\n${r.cluster}`}
+                    role="status"
+                    className="pod-table__notice pod-table__notice--scope"
+                    data-testid="restricted-scope"
+                    data-cluster={r.cluster}
+                    title={r.detail}
+                  >
+                    <span className="pill warn">{r.label}</span>
+                    <span className="visually-hidden"> {r.detail}</span>
+                  </p>
+                ))}
                 {notices.map((n) => (
                   <p
                     key={`${n.cluster}\n${n.text}`}

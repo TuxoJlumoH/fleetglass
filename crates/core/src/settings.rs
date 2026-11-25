@@ -649,6 +649,7 @@ mod tests {
             protected: true,
             pinned: true,
             unlocked_until: None,
+            watch_namespaces: vec!["payments".to_owned()],
         };
         store.set("prod-eu", prod_settings.clone()).unwrap();
 

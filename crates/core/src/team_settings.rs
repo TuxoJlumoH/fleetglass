@@ -601,6 +601,11 @@ pub fn merge_team_settings(settings: &SettingsStore, path: &Path) -> Result<Team
                 protected,
                 pinned,
                 unlocked_until: None,
+                watch_namespaces: if local_ctx.watch_namespaces.is_empty() {
+                    team_ctx.watch_namespaces.clone()
+                } else {
+                    local_ctx.watch_namespaces.clone()
+                },
             };
             settings.set(&context_name, merged)?;
             applied_contexts += 1;
@@ -774,6 +779,7 @@ contexts:
                     protected: false,
                     pinned: false,
                     unlocked_until: None,
+                    watch_namespaces: Vec::new(),
                 },
             )
             .unwrap();
