@@ -21,7 +21,9 @@ use fleetglass_core::cluster::ClusterManager;
 use fleetglass_core::kubeconfig::KubeconfigSource;
 use futures::FutureExt;
 use k8s_openapi::api::core::v1::{Container, Namespace, Pod, PodSpec, ServiceAccount};
-use k8s_openapi::api::rbac::v1::{PolicyRule, Role, RoleBinding, RoleRef, Subject};
+use k8s_openapi::api::rbac::v1::{
+    ClusterRole, ClusterRoleBinding, PolicyRule, Role, RoleBinding, RoleRef, Subject,
+};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use kube::Api;
 use kube::api::{DeleteParams, PostParams};
@@ -228,6 +230,53 @@ async fn create_fixtures(client: &kube::Client, ns: &str) {
         .unwrap();
 }
 
+/// Lets the SA of `ns` list namespaces cluster-wide (cluster-scoped objects named
+/// `cluster_name`; removed by the test's cleanup).
+async fn grant_namespace_list(client: &kube::Client, ns: &str, cluster_name: &str) {
+    Api::<ClusterRole>::all(client.clone())
+        .create(
+            &PostParams::default(),
+            &ClusterRole {
+                metadata: ObjectMeta {
+                    name: Some(cluster_name.to_owned()),
+                    ..Default::default()
+                },
+                rules: Some(vec![PolicyRule {
+                    api_groups: Some(vec![String::new()]),
+                    resources: Some(vec!["namespaces".to_owned()]),
+                    verbs: vec!["list".to_owned()],
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    Api::<ClusterRoleBinding>::all(client.clone())
+        .create(
+            &PostParams::default(),
+            &ClusterRoleBinding {
+                metadata: ObjectMeta {
+                    name: Some(cluster_name.to_owned()),
+                    ..Default::default()
+                },
+                role_ref: RoleRef {
+                    api_group: Some("rbac.authorization.k8s.io".to_owned()),
+                    kind: "ClusterRole".to_owned(),
+                    name: cluster_name.to_owned(),
+                },
+                subjects: Some(vec![Subject {
+                    kind: "ServiceAccount".to_owned(),
+                    name: SA_NAME.to_owned(),
+                    namespace: Some(ns.to_owned()),
+                    ..Default::default()
+                }]),
+            },
+        )
+        .await
+        .unwrap();
+}
+
 /// Waits until the restricted store lists exactly the pod in `ns` and is Ready.
 async fn assert_restricted(manager: &ClusterManager, context: &str, ns: &str) -> StoreAccess {
     let spec = pod_spec(context);
@@ -259,7 +308,13 @@ async fn assert_restricted(manager: &ClusterManager, context: &str, ns: &str) ->
     access
 }
 
-async fn run(admin: Arc<ClusterManager>, context: String, ns: String, tmp: PathBuf) {
+async fn run(
+    admin: Arc<ClusterManager>,
+    context: String,
+    ns: String,
+    cluster_name: String,
+    tmp: PathBuf,
+) {
     let client = admin.connect_client(&context).await.unwrap();
     create_fixtures(&client, &ns).await;
     println!("created namespace {ns} with SA/Role/RoleBinding {SA_NAME} and pod pause");
@@ -315,6 +370,56 @@ async fn run(admin: Arc<ClusterManager>, context: String, ns: String, tmp: PathB
     assert_eq!(page.total, 0);
     assert!(pod_access(&page).scope.is_none());
     println!("no accessible namespace: {:?}", pod_access(&page).access);
+    drop(denied);
+
+    // 4. Nothing configured, but namespaces may be listed: every namespace is a
+    // candidate and the rules review keeps only the one the Role allows.
+    grant_namespace_list(&client, &ns, &cluster_name).await;
+    let disc_config = impersonating_kubeconfig(&context, &sa_user, None, &tmp.join("disc"));
+    let sa_client = ClusterManager::new(KubeconfigSource::from_paths(vec![disc_config.clone()]))
+        .connect_client(&context)
+        .await
+        .unwrap();
+    let start = Instant::now();
+    while Api::<Namespace>::all(sa_client.clone())
+        .list_metadata(&Default::default())
+        .await
+        .is_err()
+    {
+        assert!(start.elapsed() < WAIT, "namespace list still forbidden");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    let discovered = ClusterManager::new(KubeconfigSource::from_paths(vec![disc_config]));
+    discovered.ensure_watching(&context, "Pod").await.unwrap();
+    let access = assert_restricted(&discovered, &context, &ns).await;
+    let scope = access.scope.unwrap();
+    println!(
+        "discovered: {:?} watched={:?} denied={} (incl. default, kube-system) truncated={}",
+        access.access,
+        scope
+            .namespaces
+            .iter()
+            .map(|n| &n.namespace)
+            .collect::<Vec<_>>(),
+        scope.denied.len(),
+        scope.truncated
+    );
+    assert_eq!(scope.source, NamespaceSource::Discovered);
+    for other in ["default", "kube-system"] {
+        assert!(
+            scope.denied.iter().any(|d| d == other),
+            "{other} is denied by the rules review: {:?}",
+            scope.denied
+        );
+    }
+}
+
+fn report_delete(what: &str, name: &str, result: Result<(), kube::Error>) {
+    match result {
+        Ok(()) => println!("deleted {what} {name}"),
+        Err(kube::Error::Api(s)) if s.code == 404 => {}
+        Err(err) => eprintln!("cleanup: deleting {what} {name} failed: {err}"),
+    }
 }
 
 #[tokio::test]
@@ -337,28 +442,51 @@ async fn live_namespace_fallback_on_cluster_wide_403() {
 
     let suffix = unique_suffix();
     let ns = format!("dev-fg0501-{suffix}");
+    let cluster_name = format!("fg0501-ns-list-{suffix}");
     let tmp = std::env::temp_dir().join(format!("fg-0501-{suffix}"));
 
     let outcome = AssertUnwindSafe(run(
         Arc::clone(&manager),
         context.clone(),
         ns.clone(),
+        cluster_name.clone(),
         tmp.clone(),
     ))
     .catch_unwind()
     .await;
 
     // Best-effort cleanup, also after a failed assertion. Deleting the namespace
-    // removes the SA, Role, RoleBinding and pod with it.
+    // removes the SA, Role, RoleBinding and pod with it; the cluster-scoped
+    // ClusterRole/ClusterRoleBinding are deleted explicitly (404 = never created).
     let _ = std::fs::remove_dir_all(&tmp);
     match manager.connect_client(&context).await {
-        Ok(client) => match Api::<Namespace>::all(client)
-            .delete(&ns, &DeleteParams::default())
-            .await
-        {
-            Ok(_) => println!("deleted namespace {ns}"),
-            Err(err) => eprintln!("cleanup: deleting namespace {ns} failed: {err}"),
-        },
+        Ok(client) => {
+            let dp = DeleteParams::default();
+            report_delete(
+                "ClusterRoleBinding",
+                &cluster_name,
+                Api::<ClusterRoleBinding>::all(client.clone())
+                    .delete(&cluster_name, &dp)
+                    .await
+                    .map(|_| ()),
+            );
+            report_delete(
+                "ClusterRole",
+                &cluster_name,
+                Api::<ClusterRole>::all(client.clone())
+                    .delete(&cluster_name, &dp)
+                    .await
+                    .map(|_| ()),
+            );
+            report_delete(
+                "namespace",
+                &ns,
+                Api::<Namespace>::all(client)
+                    .delete(&ns, &dp)
+                    .await
+                    .map(|_| ()),
+            );
+        }
         Err(err) => eprintln!("cleanup: cannot connect to delete {ns}: {err}"),
     }
 

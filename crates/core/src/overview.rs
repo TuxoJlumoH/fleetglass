@@ -138,15 +138,17 @@ fn has_data(state: &StoreAccessState) -> bool {
     )
 }
 
-/// Problem text of a store watched namespace by namespace (05-01).
-fn restricted_message(scope: &crate::api::WatchScope) -> String {
+/// Problem text of a store watched namespace by namespace (05-01), naming the
+/// resource like the "No permission to list pods" messages do.
+fn restricted_message(kind: &str, scope: &crate::api::WatchScope) -> String {
+    let resource = format!("{}s", kind.to_ascii_lowercase());
     match scope.namespaces.as_slice() {
         [only] => format!(
-            "Restricted to namespace {} (cluster-wide watch forbidden)",
+            "Watching {resource} in namespace {} only (cluster-wide watch forbidden)",
             only.namespace
         ),
         all => format!(
-            "Restricted to {} namespaces (cluster-wide watch forbidden)",
+            "Watching {resource} in {} namespaces only (cluster-wide watch forbidden)",
             all.len()
         ),
     }
@@ -887,7 +889,7 @@ fn scan_cluster(manager: &ClusterManager, cluster: &str, now: Timestamp) -> Clus
                 // Counts are real but cover only these namespaces (05-01).
                 problems.push(KindProblem {
                     kind: kind.to_owned(),
-                    message: restricted_message(&scope),
+                    message: restricted_message(kind, &scope),
                 });
             }
             stores.insert(kind, (store, access));
@@ -1464,6 +1466,30 @@ mod tests {
             src,
             Duration::from_secs(60),
         ))
+    }
+
+    #[test]
+    fn restricted_message_names_the_resource() {
+        let scope = |names: &[&str]| crate::api::WatchScope {
+            namespaces: names
+                .iter()
+                .map(|n| crate::api::NamespaceWatch {
+                    namespace: (*n).to_owned(),
+                    access: StoreAccessState::Ready,
+                })
+                .collect(),
+            source: crate::api::NamespaceSource::Configured,
+            denied: Vec::new(),
+            truncated: false,
+        };
+        assert_eq!(
+            restricted_message("Pod", &scope(&["dev"])),
+            "Watching pods in namespace dev only (cluster-wide watch forbidden)"
+        );
+        assert_eq!(
+            restricted_message("Deployment", &scope(&["dev", "qa"])),
+            "Watching deployments in 2 namespaces only (cluster-wide watch forbidden)"
+        );
     }
 
     #[test]

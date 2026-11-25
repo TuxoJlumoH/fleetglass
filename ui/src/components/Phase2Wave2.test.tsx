@@ -457,6 +457,37 @@ spec:
     expect(screen.queryByTestId("app-view-empty")).not.toBeInTheDocument();
   });
 
+  it("<AppView /> shows the restricted pill for a store watched per namespace (05-01)", async () => {
+    const access: StoreAccess[] = [
+      {
+        cluster: "kind-a",
+        kind: "Deployment",
+        access: { state: "ready" },
+        scope: {
+          namespaces: [
+            { namespace: "shop", access: { state: "ready" } },
+            { namespace: "warehouse", access: { state: "ready" } },
+          ],
+          source: "discovered",
+          denied: ["kube-system"],
+          truncated: false,
+        },
+      },
+    ];
+    const fetchApps = vi.fn(() => Promise.resolve<AppPage>({ access, total: 0, offset: 0, apps: [] }));
+
+    render(<AppView clusters={["kind-a"]} namespaces={[]} fetchApps={fetchApps} />);
+
+    const pill = await screen.findByTestId("restricted-scope");
+    expect(pill).toHaveAttribute("role", "status");
+    expect(within(pill).getByText("Restricted: 2 namespaces (cluster-wide watch forbidden)")).toHaveClass(
+      "pill",
+      "warn",
+    );
+    expect(pill).toHaveAttribute("title", expect.stringContaining("Not permitted: kube-system."));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("<AppView /> renders honest banner for Error access state instead of an empty list", async () => {
     const access: StoreAccess[] = [
       {

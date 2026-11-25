@@ -4097,6 +4097,16 @@ button.pf-bar__link {
   color: var(--warn);
 }
 
+.app-view__banner--scope {
+  padding: 0;
+  background: none;
+}
+
+.app-view__banner--scope .pill {
+  max-width: 100%;
+  white-space: normal;
+}
+
 .app-view__banner--loading {
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--accent) 10%, transparent);

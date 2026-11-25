@@ -110,9 +110,9 @@ const SOURCE_DETAIL = {
   contextNamespace: "the kubeconfig context's namespace",
 } as const;
 
-export function restrictedScope(entry: StoreAccess): RestrictedScope | null {
+export function restrictedScope(entry: AnyStoreAccess): RestrictedScope | null {
   const { scope } = entry;
-  if (scope === undefined) return null;
+  if (scope === undefined || scope === null) return null;
   const watched = scope.namespaces.map((n) => n.namespace);
   const count = watched.length;
   const label = `Restricted: ${count === 1 ? `namespace ${watched[0] ?? ""}` : `${formatCount(count)} namespaces`} (cluster-wide watch forbidden)`;

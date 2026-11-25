@@ -513,6 +513,20 @@ impl ResourceStore {
         self.notify_changed();
     }
 
+    /// `true` when a change of the context's `watchNamespaces` should re-plan this
+    /// store: it runs a per-namespace fallback, or its cluster-wide watch is
+    /// forbidden (possibly because no namespace was accessible before).
+    fn wants_fallback_replan(&self) -> bool {
+        self.scope().is_some()
+            || matches!(
+                self.access(),
+                StoreAccessState::Forbidden {
+                    namespace: None,
+                    ..
+                }
+            )
+    }
+
     /// Back to a cluster-wide watch (watcher start or resync): clears the scope
     /// and reports the store as (re)connecting.
     fn leave_namespace_scope(&self) {
@@ -1477,6 +1491,9 @@ impl ResourceStore {
                             if changed.is_err() {
                                 return;
                             }
+                            // A resync (e.g. new `watchNamespaces`) may plan the
+                            // fallback again right away.
+                            fallback_retry_at = None;
                             break;
                         }
                         () = progress_timer.as_mut(), if progress_at.is_some() => {
@@ -2713,7 +2730,7 @@ impl ClusterManager {
         }
         let stores = self.stores.read().unwrap_or_else(PoisonError::into_inner);
         for ((ctx, _), store) in stores.iter() {
-            if ctx == context && store.scope().is_some() {
+            if ctx == context && store.wants_fallback_replan() {
                 store.resync();
             }
         }
@@ -5850,6 +5867,41 @@ mod tests {
         );
         store.leave_namespace_scope();
         assert!(store.scope().is_none());
+    }
+
+    #[test]
+    fn changing_watch_namespaces_resyncs_restricted_and_forbidden_stores() {
+        let manager = dummy_manager(Duration::from_secs(60));
+        let forbidden = manager.get_or_create_store("c", "Pod");
+        forbidden.set_access(StoreAccessState::Forbidden {
+            resource: "pods".to_owned(),
+            namespace: None,
+            message: "No permission to list pods".to_owned(),
+        });
+        let restricted = manager.get_or_create_store("c", "Deployment");
+        restricted.enter_namespace_scope(&fallback_plan(&["dev"], &[]));
+        let ready = manager.get_or_create_store("c", "Service");
+        ready.set_access(StoreAccessState::Ready);
+        let other_context = manager.get_or_create_store("d", "Pod");
+        other_context.set_access(forbidden.access());
+
+        let rx = |s: &ResourceStore| s.resync_tx.subscribe();
+        let (rx_forbidden, rx_restricted, rx_ready, rx_other) = (
+            rx(&forbidden),
+            rx(&restricted),
+            rx(&ready),
+            rx(&other_context),
+        );
+        manager.set_watch_namespaces("c", vec!["dev".to_owned()]);
+        assert!(rx_forbidden.has_changed().expect("open"));
+        assert!(rx_restricted.has_changed().expect("open"));
+        assert!(!rx_ready.has_changed().expect("open"));
+        assert!(!rx_other.has_changed().expect("open"));
+
+        // An unchanged list does not resync again.
+        let rx_again = rx(&forbidden);
+        manager.set_watch_namespaces("c", vec!["dev".to_owned()]);
+        assert!(!rx_again.has_changed().expect("open"));
     }
 
     #[test]

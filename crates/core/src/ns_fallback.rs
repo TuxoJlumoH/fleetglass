@@ -12,6 +12,8 @@
 //! namespace, any authenticated user may create one); candidates whose rules do
 //! not grant both `list` and `watch` are reported as denied and not watched.
 
+use std::future::Future;
+
 use futures::{StreamExt, TryStreamExt};
 use k8s_openapi::api::authorization::v1::{
     ResourceRule, SelfSubjectRulesReview, SelfSubjectRulesReviewSpec,
@@ -77,16 +79,26 @@ pub fn rules_allow(rules: &[ResourceRule], group: &str, resource: &str, verbs: &
     })
 }
 
-/// `true` when the user may list and watch `resource` in `namespace`, by a
-/// `SelfSubjectRulesReview`. An incomplete review (e.g. a webhook authorizer
-/// the review cannot evaluate) that does not grant access counts as allowed:
-/// the namespace's watcher then reports the real answer itself.
-async fn namespace_allows(
-    client: &kube::Client,
-    namespace: &str,
-    group: &str,
-    resource: &str,
-) -> Result<bool, kube::Error> {
+/// Outcome of a `SelfSubjectRulesReview` for one namespace, reduced to what the
+/// fallback needs.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RulesReview {
+    pub rules: Vec<ResourceRule>,
+    /// The review could not evaluate every authorizer (e.g. a webhook).
+    pub incomplete: bool,
+}
+
+impl RulesReview {
+    /// `true` when the review allows list + watch of `resource` (API `group`).
+    /// An incomplete review that does not grant access counts as allowed: the
+    /// namespace's watcher then reports the real answer itself.
+    #[must_use]
+    pub fn allows(&self, group: &str, resource: &str) -> bool {
+        rules_allow(&self.rules, group, resource, &WATCH_VERBS) || self.incomplete
+    }
+}
+
+async fn rules_review(client: &kube::Client, namespace: &str) -> Result<RulesReview, kube::Error> {
     let review = SelfSubjectRulesReview {
         spec: SelfSubjectRulesReviewSpec {
             namespace: Some(namespace.to_owned()),
@@ -96,53 +108,65 @@ async fn namespace_allows(
     let reviewed = kube::Api::<SelfSubjectRulesReview>::all(client.clone())
         .create(&PostParams::default(), &review)
         .await?;
-    let Some(status) = reviewed.status else {
-        return Ok(true);
-    };
-    Ok(rules_allow(&status.resource_rules, group, resource, &WATCH_VERBS) || status.incomplete)
+    // No status at all: nothing to go on, let the watcher find out.
+    Ok(reviewed.status.map_or(
+        RulesReview {
+            rules: Vec::new(),
+            incomplete: true,
+        },
+        |status| RulesReview {
+            rules: status.resource_rules,
+            incomplete: status.incomplete,
+        },
+    ))
 }
 
-/// Candidate namespaces and their source (see the module docs). A forbidden
-/// namespace list falls back to the client's default namespace; other errors
-/// are returned.
-async fn candidates(
-    client: &kube::Client,
+/// Candidate namespaces and their source (see the module docs), given the
+/// configured list, the result of listing namespaces (only awaited when nothing
+/// is configured) and the client's default namespace. A forbidden (403) list
+/// falls back to the default namespace; other errors are returned.
+pub async fn candidates<L>(
     configured: Vec<String>,
-) -> Result<(Vec<String>, NamespaceSource), kube::Error> {
+    list_namespaces: L,
+    default_namespace: &str,
+) -> Result<(Vec<String>, NamespaceSource), kube::Error>
+where
+    L: Future<Output = Result<Vec<String>, kube::Error>>,
+{
     if configured.iter().any(|n| !n.trim().is_empty()) {
         return Ok((configured, NamespaceSource::Configured));
     }
-    let list = kube::Api::<Namespace>::all(client.clone())
-        .list_metadata(&ListParams::default())
-        .await;
-    match list {
-        Ok(list) => Ok((
-            list.items
-                .into_iter()
-                .filter_map(|ns| ns.metadata.name)
-                .collect(),
-            NamespaceSource::Discovered,
-        )),
+    match list_namespaces.await {
+        Ok(names) => Ok((names, NamespaceSource::Discovered)),
         Err(kube::Error::Api(status)) if status.code == 403 => Ok((
-            vec![client.default_namespace().to_owned()],
+            vec![default_namespace.to_owned()],
             NamespaceSource::ContextNamespace,
         )),
         Err(err) => Err(err),
     }
 }
 
-/// Works out which namespaces to watch `resource` (API `group`) in.
-pub async fn plan(
-    client: &kube::Client,
+/// [`plan`] with the API calls injected: `list_namespaces` lists namespace
+/// names, `review` runs a rules review for one namespace.
+pub async fn plan_with<L, R, RF>(
     group: &str,
     resource: &str,
     configured: Vec<String>,
-) -> Result<FallbackPlan, kube::Error> {
-    let (names, source) = candidates(client, configured).await?;
+    default_namespace: &str,
+    list_namespaces: L,
+    review: R,
+) -> Result<FallbackPlan, kube::Error>
+where
+    L: Future<Output = Result<Vec<String>, kube::Error>>,
+    R: Fn(String) -> RF,
+    RF: Future<Output = Result<RulesReview, kube::Error>>,
+{
+    let (names, source) = candidates(configured, list_namespaces, default_namespace).await?;
     let (names, truncated) = normalise_candidates(names);
+    let review = &review;
     let checked: Vec<(String, bool)> = futures::stream::iter(names)
         .map(|ns| async move {
-            let ok = namespace_allows(client, &ns, group, resource).await?;
+            let ok = review(ns.clone()).await?.allows(group, resource);
             Ok::<_, kube::Error>((ns, ok))
         })
         .buffered(REVIEW_CONCURRENCY)
@@ -155,6 +179,34 @@ pub async fn plan(
         denied: denied.into_iter().map(|(ns, _)| ns).collect(),
         truncated,
     })
+}
+
+/// Works out which namespaces to watch `resource` (API `group`) in.
+pub async fn plan(
+    client: &kube::Client,
+    group: &str,
+    resource: &str,
+    configured: Vec<String>,
+) -> Result<FallbackPlan, kube::Error> {
+    let list = async {
+        let list = kube::Api::<Namespace>::all(client.clone())
+            .list_metadata(&ListParams::default())
+            .await?;
+        Ok(list
+            .items
+            .into_iter()
+            .filter_map(|ns| ns.metadata.name)
+            .collect())
+    };
+    plan_with(
+        group,
+        resource,
+        configured,
+        client.default_namespace(),
+        list,
+        |ns| async move { rules_review(client, &ns).await },
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -245,5 +297,127 @@ mod tests {
         assert_eq!(names.len(), MAX_FALLBACK_NAMESPACES);
         assert_eq!(names[0], "ns-000");
         assert!(cut);
+    }
+
+    fn api_error(code: u16) -> kube::Error {
+        kube::Error::Api(
+            kube::core::Status::failure("denied", "Forbidden")
+                .with_code(code)
+                .boxed(),
+        )
+    }
+
+    /// Rules review: `pods` list/watch only in the namespaces of `allowed`.
+    fn review_for(
+        allowed: &'static [&'static str],
+    ) -> impl Fn(String) -> std::future::Ready<Result<RulesReview, kube::Error>> {
+        move |ns: String| {
+            let rules = if allowed.contains(&ns.as_str()) {
+                vec![rule(&[""], &["pods"], &["get", "list", "watch"])]
+            } else {
+                vec![rule(&[""], &["configmaps"], &["list", "watch"])]
+            };
+            std::future::ready(Ok(RulesReview {
+                rules,
+                incomplete: false,
+            }))
+        }
+    }
+
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    #[tokio::test]
+    async fn discovered_namespaces_are_filtered_by_the_rules_review() {
+        let plan = plan_with(
+            "",
+            "pods",
+            Vec::new(),
+            "default",
+            std::future::ready(Ok(names(&["kube-system", "dev", "default", "qa"]))),
+            review_for(&["dev", "qa"]),
+        )
+        .await
+        .expect("plan");
+        assert_eq!(
+            plan,
+            FallbackPlan {
+                source: NamespaceSource::Discovered,
+                allowed: names(&["dev", "qa"]),
+                denied: names(&["default", "kube-system"]),
+                truncated: false,
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn configured_namespaces_skip_the_namespace_list() {
+        let list = async { panic!("must not list namespaces when some are configured") };
+        let plan = plan_with(
+            "",
+            "pods",
+            names(&["qa", "dev"]),
+            "default",
+            list,
+            review_for(&["dev"]),
+        )
+        .await
+        .expect("plan");
+        assert_eq!(plan.source, NamespaceSource::Configured);
+        assert_eq!(plan.allowed, names(&["dev"]));
+        assert_eq!(plan.denied, names(&["qa"]));
+    }
+
+    #[tokio::test]
+    async fn forbidden_namespace_list_falls_back_to_the_context_namespace() {
+        let plan = plan_with(
+            "",
+            "pods",
+            vec![" ".to_owned()],
+            "dev",
+            std::future::ready(Err(api_error(403))),
+            review_for(&["dev"]),
+        )
+        .await
+        .expect("plan");
+        assert_eq!(plan.source, NamespaceSource::ContextNamespace);
+        assert_eq!(plan.allowed, names(&["dev"]));
+        assert!(plan.denied.is_empty());
+    }
+
+    #[tokio::test]
+    async fn other_list_or_review_errors_fail_the_plan() {
+        let failed = plan_with(
+            "",
+            "pods",
+            Vec::new(),
+            "default",
+            std::future::ready(Err(api_error(500))),
+            review_for(&[]),
+        )
+        .await;
+        assert!(matches!(failed, Err(kube::Error::Api(s)) if s.code == 500));
+
+        let failed = plan_with(
+            "",
+            "pods",
+            Vec::new(),
+            "default",
+            std::future::ready(Ok(names(&["dev"]))),
+            |_ns: String| std::future::ready(Err(api_error(500))),
+        )
+        .await;
+        assert!(failed.is_err());
+    }
+
+    #[test]
+    fn incomplete_review_counts_as_allowed() {
+        let review = RulesReview {
+            rules: Vec::new(),
+            incomplete: true,
+        };
+        assert!(review.allows("", "pods"));
+        assert!(!RulesReview::default().allows("", "pods"));
     }
 }
