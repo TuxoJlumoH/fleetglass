@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/screenshot.png" width="900" alt="Fleetglass desktop client showing pods from multiple Kubernetes clusters">
+  <img src="docs/assets/demo.gif" width="900" alt="Fleetglass demo: Overview, filtering pods, command palette, deployments and the detail drawer">
 </p>
 
 ---
@@ -85,9 +85,9 @@ Download pre-built binaries from [Releases](https://github.com/TuxoJlumoH/fleetg
 | Platform | Package | Notes |
 |---|---|---|
 | **Android** (10+, API 29+) | `fleetglass-android-arm64-v8a.apk`<br>`fleetglass-android-x86_64.apk` | Standalone client. See [Android Verification Guide](docs/VERIFYING_APK.md). |
-| **Linux** | Build from source | Linux packages (Flatpak, AUR, deb, rpm) and ARM64 builds in progress for v0.5. |
-| **macOS** (Intel / Apple Silicon) | `Fleetglass_<version>_x64.dmg` | Open via **System Settings → Privacy & Security → Open Anyway** on first launch. |
-| **Windows** (10/11 x64) | `Fleetglass_<version>_x64-setup.exe` | SmartScreen warning on first launch: **More info → Run anyway**. |
+| **Linux** (x64 / ARM64) | `.AppImage`, `.deb`, `.rpm` (`amd64`/`x86_64` or `arm64`/`aarch64`) | Flatpak and AUR are planned for v0.5. |
+| **macOS** (Apple Silicon / Intel) | `Fleetglass_<version>_aarch64.dmg` / `Fleetglass_<version>_x64.dmg` | Not notarized yet: run `xattr -dr com.apple.quarantine /Applications/Fleetglass.app`, or **System Settings → Privacy & Security → Open Anyway**. Intel builds start with v0.4.1. |
+| **Windows** (10/11 x64) | `Fleetglass_<version>_x64-setup.exe` or `.msi` | SmartScreen warning on first launch: **More info → Run anyway**. |
 
 > [!NOTE]
 > Fleetglass loads your kubeconfig read-only (`KUBECONFIG` or `~/.kube/config`). It **never modifies** your original kubeconfig files.
@@ -134,11 +134,38 @@ The frontend never receives unbounded JSON payloads; the Rust backend executes w
 Next up for **v0.5.0** ([details](docs/PLAN.md#phase-05-distribution-packaging--daily-driver-polish-active-2026-11-13)):
 
 - **Signed In-App Auto-Updater:** `tauri-plugin-updater` with ECDSA signature verification.
-- **Expanded Packaging:** Flatpak, AUR (`PKGBUILD`), Homebrew Cask, winget, and Linux ARM64 releases.
+- **Expanded Packaging:** Flatpak, AUR (`PKGBUILD`), Homebrew Cask and winget.
 - **Per-Namespace Watcher Fallback:** Graceful fallback to watching accessible namespaces on RBAC 403 Forbidden.
 - **In-App PTY Terminal:** Embedded `xterm.js` with dynamic PTY window resize signals alongside external terminal handoff.
 - **Split View Layout:** Resizable horizontal and vertical split panes for simultaneous side-by-side inspection.
 - **Schema Validation & Autocomplete:** Kubernetes OpenAPI JSONSchema diagnostics inside the CodeMirror 6 YAML editor.
+
+---
+
+## How This Was Built
+
+Fleetglass is a portfolio project and an experiment in directing AI coding agents. I wrote no
+feature code by hand. My job was product owner, architect and reviewer:
+
+- **Plan first.** I started from research into what people dislike about existing Kubernetes
+  clients: freezes on big clusters, confusing empty lists and broken cloud auth. From that I wrote
+  [`docs/PLAN.md`](docs/PLAN.md) with non-negotiables (no account, no telemetry, the backend owns
+  the data, honest error states) and hard performance budgets. Key decisions are recorded as
+  [ADRs](docs/adr/).
+- **Small tasks with acceptance criteria.** The work was split into tasks with a clear "done when",
+  scoped to specific crates or folders and grouped into phases (0.1 → 0.4) with a review gate at the
+  end of each phase.
+- **An orchestrator and workers.** An orchestrator agent picked tasks, briefed worker agents and
+  checked their reports. Strong hosted models handled architecture-heavy tasks. Local open-weight
+  models (Qwen, DeepSeek) handled smaller, well-specified ones.
+- **Machines check, humans decide.** Every change had to pass `cargo fmt`, `clippy -D warnings`, unit
+  tests, UI lint/typecheck/tests, `cargo deny`, and an integration job that boots a real kind cluster,
+  scales it with kwok and fails the build if a performance budget is missed. An end-to-end smoke test
+  drives the built app under Xvfb with synthetic input and OCR. I reviewed the results and the code,
+  and sent work back when it didn't hold up.
+- **Agents never touch real clusters.** They only get a throwaway kind cluster and its kubeconfig.
+
+The public history starts at a squashed snapshot of v0.4. Commits since then are regular.
 
 ---
 
