@@ -426,12 +426,7 @@ fn extract_metadata(
 pub fn project_deployment(deploy: &Deployment, cluster: &str) -> Row {
     let (uid, name, namespace, labels, created) = extract_metadata(&deploy.metadata);
 
-    let desired_i32 = deploy
-        .spec
-        .as_ref()
-        .and_then(|s| s.replicas)
-        .unwrap_or(1)
-        .max(0);
+    let desired_i32 = deploy.spec.replicas.unwrap_or(1).max(0);
     let ready_i32 = deploy
         .status
         .as_ref()
@@ -464,7 +459,7 @@ pub fn project_deployment(deploy: &Deployment, cluster: &str) -> Row {
         .and_then(|s| s.conditions.as_deref())
         .unwrap_or(&[])
         .iter()
-        .find(|c| c.type_ == "Progressing" && c.status == "False")
+        .find(|c| c.type_.as_deref() == Some("Progressing") && c.status.as_deref() == Some("False"))
     {
         let reason = cond
             .reason
@@ -1099,10 +1094,10 @@ mod tests {
                 creation_timestamp: Some(creation),
                 ..Default::default()
             },
-            spec: Some(DeploymentSpec {
+            spec: DeploymentSpec {
                 replicas: Some(3),
                 ..Default::default()
-            }),
+            },
             status: Some(DeploymentStatus {
                 ready_replicas: Some(3),
                 updated_replicas: Some(3),
@@ -1127,8 +1122,8 @@ mod tests {
         assert_eq!(progressing.status_reason, "Progressing");
 
         deploy.status.as_mut().unwrap().conditions = Some(vec![DeploymentCondition {
-            type_: "Progressing".to_owned(),
-            status: "False".to_owned(),
+            type_: Some("Progressing".to_owned()),
+            status: Some("False".to_owned()),
             reason: Some("ProgressDeadlineExceeded".to_owned()),
             ..Default::default()
         }]);

@@ -15,7 +15,7 @@ KIND_VERSION="${FG_KIND_VERSION:-v0.33.0}"
 KWOK_VERSION="${FG_KWOK_VERSION:-v0.8.0}"
 PNPM_VERSION="${FG_PNPM_VERSION:-12.16.1}"
 # Minimums checked by --check.
-MIN_RUSTC="1.89.0" # edition 2024 + kube MSRV
+MIN_RUSTC="1.95.0" # edition 2024 + kube MSRV
 MIN_NODE="20.19.0" # Vite 8 / React 19 toolchain
 BIN_DIR="${FG_BIN_DIR:-$HOME/.local/bin}"
 DOCKER_TIMEOUT="${FG_DOCKER_TIMEOUT:-15}"

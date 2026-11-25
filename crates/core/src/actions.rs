@@ -1383,12 +1383,11 @@ mod tests {
         let secret = "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
         let auth_err = kube::client::AuthError::AuthExecRun {
             cmd: format!("aws-iam-authenticator token -i cluster --env {secret}"),
-            status,
-            out: std::process::Output {
+            out: Box::new(std::process::Output {
                 status,
                 stdout: format!("{{\"token\":\"k8s-aws-v1.{secret}\"}}").into_bytes(),
                 stderr: format!("error: {secret} was invalid").into_bytes(),
-            },
+            }),
         };
         let outcome = Err(Error::Kube(kube::Error::Auth(auth_err)));
         // Sanity check: the unsanitised Display really does carry the secret.

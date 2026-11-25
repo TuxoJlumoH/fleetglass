@@ -296,10 +296,7 @@ pub async fn resolve_target_pod(
             let deploys: Api<k8s_openapi::api::apps::v1::Deployment> =
                 Api::namespaced(client.clone(), namespace);
             let deploy = deploys.get(target_name).await.map_err(Error::Kube)?;
-            let match_labels = deploy
-                .spec
-                .and_then(|s| s.selector.match_labels)
-                .unwrap_or_default();
+            let match_labels = deploy.spec.selector.match_labels.unwrap_or_default();
             if match_labels.is_empty() {
                 return Err(Error::TargetNotFound {
                     kind: "Deployment".to_owned(),
