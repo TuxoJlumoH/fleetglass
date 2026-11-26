@@ -81,11 +81,11 @@ jobs:
 
       # Licences, bans and sources must pass; new RustSec advisories are reported in a separate,
       # non-blocking step so an upstream advisory cannot break unrelated PRs.
-      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+      - uses: EmbarkStudios/cargo-deny-action@17aeb3c839e42274e2b8adf721c8c65edfdc74dd # v2.1.3
         with:
           command: check licenses bans sources
 
-      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+      - uses: EmbarkStudios/cargo-deny-action@17aeb3c839e42274e2b8adf721c8c65edfdc74dd # v2.1.3
         continue-on-error: true
         with:
           command: check advisories
